@@ -1434,6 +1434,7 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 			kubeconfigFlag(),
 			dataFlag(),
 			externalOnlyFlag(),
+			withFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
 				Name:     flagInsecureTLS,
@@ -1601,6 +1602,11 @@ func runBundleCmdWithDependencies(
 	opts, err := parseBundleCmdOptions(cmd, cfg)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid bundle command options")
+	}
+	if opts.attest {
+		if attestErr := rejectAttestedComposition(cmd, cfg); attestErr != nil {
+			return attestErr
+		}
 	}
 	// Registered before every later cleanup so it runs after them and sees
 	// their errors too: a failed run must not leave a layout that makes a

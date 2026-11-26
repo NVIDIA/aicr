@@ -99,6 +99,14 @@ func (r *RecipeSpec) DataDir() string {
 	return r.Data
 }
 
+// CatalogList returns spec.recipe.catalogs, or nil when unset.
+func (r *RecipeSpec) CatalogList() []string {
+	if r == nil {
+		return nil
+	}
+	return r.Catalogs
+}
+
 // IsExternalOnly reports whether embedded catalog data is disabled.
 func (r *RecipeSpec) IsExternalOnly() bool {
 	return r != nil && r.ExternalOnly

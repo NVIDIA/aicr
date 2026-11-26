@@ -110,6 +110,24 @@ var (
 		}
 	}
 
+	withFlag = func() cli.Flag {
+		return &cli.StringSliceFlag{
+			Name: "with",
+			Usage: `Compose catalogs by graph union (repeatable). Each value is "nvidia" (the
+	built-in catalog) or the path of a catalog directory whose registry.yaml declares
+	metadata.name. The result does not depend on the order given. Two catalogs that
+	define the same component, validator, overlay, mixin or file fail with an error
+	naming both. Repeat the flag to add a catalog (--with nvidia --with ./partner); do not
+	pack several into one value, because commands differ in whether they split a slice
+	flag on commas (bundle does not). A directory whose path contains a comma can be
+	listed under spec.recipe.catalogs instead. With no --with and no spec.recipe.catalogs
+	the built-in catalog is used. --data still layers one override directory over the
+	composition, last wins. Not compatible with --external-only, and not with --attest
+	when a value is a directory.`,
+			Category: catInput,
+		}
+	}
+
 	externalOnlyFlag = func() cli.Flag {
 		return &cli.BoolFlag{
 			Name:     "external-only",
@@ -427,8 +445,24 @@ func recipeClientFromCmd(
 	if err != nil {
 		return nil, err
 	}
+	refs, err := catalogRefsFromCmd(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) > 0 && externalOnly {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--with (spec.recipe.catalogs) cannot be combined with --external-only (spec.recipe.externalOnly): external-only composes nothing")
+	}
 	source := aicr.EmbeddedSource()
-	if dataDir != "" {
+	switch {
+	case len(refs) > 0:
+		slog.Info("composing catalogs", "catalogs", refs, "override_directory", dataDir)
+		catalogs := make([]aicr.RecipeSourceOption, 0, len(refs))
+		for _, ref := range refs {
+			catalogs = append(catalogs, aicr.CatalogSource(ref))
+		}
+		source = aicr.ComposedSource(catalogs...).WithOverride(dataDir)
+	case dataDir != "":
 		slog.Info("initializing external data provider", "directory", dataDir, "external_only", externalOnly)
 		source = aicr.FilesystemSource(dataDir)
 		if externalOnly {
@@ -445,6 +479,54 @@ func recipeClientFromCmd(
 			"failed to initialize data provider")
 	}
 	return client, nil
+}
+
+// catalogRefsFromCmd returns the catalogs to compose: the values of the
+// repeatable --with flag, or spec.recipe.catalogs when the flag is not set.
+// Each is "nvidia" or a catalog directory. It returns nil when none is set,
+// which leaves the built-in catalog (and --data) behaving exactly as before.
+func catalogRefsFromCmd(cmd *cli.Command, cfg *aicr.Config) ([]string, error) {
+	refs := cmd.StringSlice("with")
+	if len(refs) == 0 {
+		refs = cfg.CatalogList()
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				`--with (spec.recipe.catalogs) needs "nvidia" or a catalog directory, got an empty value`)
+		}
+		out = append(out, ref)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// rejectAttestedComposition fails --attest for a bundle built from a
+// composition that includes a catalog directory. The bundle does not carry that
+// catalog's files in data/, so the attestation would record the recipe source
+// as embedded and verification would trust it as built from embedded recipe
+// data only. It runs before any signing prompt; the bundler enforces the same
+// rule for SDK and server callers.
+func rejectAttestedComposition(cmd *cli.Command, cfg *aicr.Config) error {
+	refs, err := catalogRefsFromCmd(cmd, cfg)
+	if err != nil || len(refs) == 0 {
+		return err
+	}
+	catalogs := make([]aicr.RecipeSourceOption, 0, len(refs))
+	for _, ref := range refs {
+		catalogs = append(catalogs, aicr.CatalogSource(ref))
+	}
+	if aicr.ComposedSource(catalogs...).IncludesDirectoryCatalog() {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--attest cannot sign a bundle built from a composed catalog directory (--with, spec.recipe.catalogs): "+
+				"the bundle does not carry that catalog's files in data/, so the attestation would claim embedded recipe data only; "+
+				"remove --attest, or build the bundle from a single --data catalog, whose files are copied into the bundle")
+	}
+	return nil
 }
 
 func catalogInputsFromCmd(cmd *cli.Command, cfg *aicr.Config) (string, bool, error) {

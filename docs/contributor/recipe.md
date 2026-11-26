@@ -111,10 +111,16 @@ Top-level schema (`ComponentRegistry`):
 ```yaml
 apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
+metadata:
+  name: <catalog-name>   # lowercase DNS label; required to compose with --with, optional for --data
 components:
   - name: <component-id>
     # Additional component fields omitted.
 ```
+
+`metadata.name` is the catalog's identity when catalogs are composed with
+`--with`; the built-in catalog is `nvidia` and that name is reserved. See
+[Composing catalogs](../integrator/data-extension.md#composing-catalogs).
 
 `ComponentConfig` fields (see `pkg/recipe/components.go`):
 

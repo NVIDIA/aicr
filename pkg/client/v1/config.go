@@ -172,8 +172,10 @@ func (c *Config) BundleVerifyOptions() (BundleVerifyOptions, error) {
 	}, nil
 }
 
-// RecipeSource derives the Client recipe source from spec.recipe.data, and
-// reports whether the document configured one.
+// RecipeSource derives the Client recipe source from spec.recipe.data and
+// spec.recipe.catalogs, and reports whether the document configured one.
+// spec.recipe.catalogs yields a ComposedSource of those catalogs with
+// spec.recipe.data, when set, layered over it with last-wins precedence.
 //
 // This is the piece that lets a committed config stand up a Client at all: a
 // non-empty data directory yields a FilesystemSource layered over the embedded
@@ -194,10 +196,27 @@ func (c *Config) RecipeSource() (RecipeSourceOption, bool) {
 	if c.IsExternalOnly() {
 		return ExternalFilesystemSource(dir), true
 	}
+	if refs := c.CatalogList(); len(refs) > 0 {
+		catalogs := make([]RecipeSourceOption, 0, len(refs))
+		for _, ref := range refs {
+			catalogs = append(catalogs, CatalogSource(ref))
+		}
+		return ComposedSource(catalogs...).WithOverride(dir), true
+	}
 	if dir == "" {
 		return RecipeSourceOption{}, false
 	}
 	return FilesystemSource(dir), true
+}
+
+// CatalogList reports spec.recipe.catalogs: the catalogs to compose, each
+// "nvidia" or a catalog directory. It returns nil when none is set or the
+// Config is nil.
+func (c *Config) CatalogList() []string {
+	if c == nil || c.internal == nil {
+		return nil
+	}
+	return c.internal.Recipe().CatalogList()
 }
 
 // IsExternalOnly reports spec.recipe.externalOnly.

@@ -17,6 +17,7 @@ package recipe
 import (
 	"context"
 	"embed"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -247,8 +248,11 @@ func (p *EmbeddedDataProvider) Source(path string) string {
 // ExternalOnly disables all embedded reads and merges.
 type LayeredDataProvider struct {
 	externalOnly bool
-	embedded     *EmbeddedDataProvider
-	externalDir  string
+	// embedded is the base the external directory is layered over: the
+	// embedded catalog for --data, or a ComposedDataProvider for --with
+	// plus --data. Nil only when externalOnly is set.
+	embedded    DataProvider
+	externalDir string
 
 	// maxFileSize bounds read-time loads against the same limit the walk-time
 	// check uses, so a TOCTOU swap on a network mount cannot bypass a
@@ -330,6 +334,23 @@ const (
 // - Path traversal is detected
 // - File size exceeds limits
 func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProviderConfig) (*LayeredDataProvider, error) {
+	// Keep a nil *EmbeddedDataProvider a nil interface, not a non-nil
+	// interface holding a nil pointer.
+	var base DataProvider
+	if embedded != nil {
+		base = embedded
+	}
+	return NewLayeredDataProviderOver(base, config)
+}
+
+// NewLayeredDataProviderOver layers the external directory in config over
+// base, which is any DataProvider (the embedded catalog, or a composition of
+// catalogs). The external directory is the last override layer: it wins over
+// base file by file, exactly as it does over the embedded catalog.
+//
+// base may be nil only when config.ExternalOnly is set; a nil base otherwise
+// fails on the first read that falls through to it.
+func NewLayeredDataProviderOver(base DataProvider, config LayeredProviderConfig) (*LayeredDataProvider, error) {
 	slog.Debug("creating layered data provider",
 		"external_dir", config.ExternalDir,
 		"max_file_size", config.MaxFileSize,
@@ -339,7 +360,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "external-only catalog requires an external data directory")
 	}
 	if config.ExternalOnly {
-		embedded = nil
+		base = nil
 	}
 
 	if config.MaxFileSize == 0 {
@@ -440,7 +461,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 
 	return &LayeredDataProvider{
 		externalOnly:  config.ExternalOnly,
-		embedded:      embedded,
+		embedded:      base,
 		externalDir:   config.ExternalDir,
 		maxFileSize:   config.MaxFileSize,
 		allowSymlinks: config.AllowSymlinks,
@@ -565,6 +586,10 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 	// Track files we've visited (to avoid duplicates)
 	visited := make(map[string]bool)
 
+	// fs.SkipAll ends the whole walk. The external walk consumes it, so it is
+	// recorded here to keep the walk from continuing into the base.
+	stopped := false
+
 	// Walk external directory first
 	externalRoot := filepath.Join(p.externalDir, root)
 	if _, err := os.Stat(externalRoot); err == nil {
@@ -588,7 +613,11 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 
 			visited[slashRelPath] = true
 			slog.Debug("visiting external file", "path", slashRelPath, "isDir", d.IsDir())
-			return fn(slashRelPath, d, nil)
+			fnErr := fn(slashRelPath, d, nil)
+			if stderrors.Is(fnErr, fs.SkipAll) {
+				stopped = true
+			}
+			return fnErr
 		})
 		if err != nil {
 			return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
@@ -596,7 +625,7 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 		}
 	}
 
-	if p.externalOnly {
+	if p.externalOnly || stopped {
 		return nil
 	}
 
@@ -637,16 +666,30 @@ func (p *LayeredDataProvider) Source(path string) string {
 		// Merged only when external catalog exists (catalog is optional).
 		source = sourceMerged
 	case p.externalFiles[normalizedPath] && patched:
-		// A profile patch adds values to an embedded overlay whose criteria
-		// and identity stay embedded.
-		source = sourceEmbedded
+		// A profile patch adds values to a base overlay whose criteria and
+		// identity stay the base's, so it keeps the base's provenance.
+		source = p.baseSource(path)
 	case p.externalFiles[normalizedPath] && !patched:
 		source = sourceExternal
 	default:
-		source = sourceEmbedded
+		// A file the external directory does not own keeps the provenance
+		// its base reports.
+		source = p.baseSource(path)
 	}
 	slog.Debug("resolved file source", "path", path, "source", source)
 	return source
+}
+
+// baseSource reports where a path the external directory does not own comes
+// from. The base is the embedded catalog, which always answers "embedded", or
+// a composition of catalogs, whose answer tells the built-in catalog from a
+// partner one. Reporting "embedded" for everything the override does not own
+// would let adding --data change how a partner overlay is validated.
+func (p *LayeredDataProvider) baseSource(path string) string {
+	if p.embedded == nil {
+		return sourceEmbedded
+	}
+	return p.embedded.Source(path)
 }
 
 // fileReader is a minimal interface for reading a file by path.
@@ -659,10 +702,15 @@ type fileReader interface {
 // a validator is supplied, merges them, and serializes the result back to YAML
 // bytes. Validation deliberately precedes merge so an embedded header cannot
 // erase an unsupported external one.
+//
+// baseOptional says the base may legitimately lack the file: a composition of
+// catalogs that ships no validators/catalog.yaml serves none, and an external
+// one layered over it must still load. A missing file then merges as an empty
+// base. Any other read failure is still an error.
 func mergeEmbeddedAndExternal[T any](
 	ctx context.Context,
 	embedded fileReader, externalDir string, maxFileSize int64, allowSymlinks bool,
-	fileName string, validateExternal func(embedded, external *T) error,
+	fileName string, baseOptional bool, validateExternal func(embedded, external *T) error,
 	merge func(embedded, external *T) *T,
 ) ([]byte, error) {
 
@@ -671,13 +719,16 @@ func mergeEmbeddedAndExternal[T any](
 
 	// Load embedded
 	embeddedData, err := embedded.ReadFile(ctx, fileName)
-	if err != nil {
+	missingBase := baseOptional && stderrors.Is(err, fs.ErrNotExist)
+	if err != nil && !missingBase {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read embedded "+kind, err)
 	}
 
 	var embeddedVal T
-	if unmarshalErr := yaml.Unmarshal(embeddedData, &embeddedVal); unmarshalErr != nil {
-		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse embedded "+kind, unmarshalErr)
+	if !missingBase {
+		if unmarshalErr := yaml.Unmarshal(embeddedData, &embeddedVal); unmarshalErr != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse embedded "+kind, unmarshalErr)
+		}
 	}
 
 	// Load external
@@ -724,7 +775,7 @@ func mergeEmbeddedAndExternal[T any](
 func (p *LayeredDataProvider) getMergedRegistry(ctx context.Context) ([]byte, error) {
 	p.mergedRegistryOnce.Do(func() {
 		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
-			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName, false,
 			func(_ *ComponentRegistry, registry *ComponentRegistry) error {
 				return validateComponentRegistryHeader(registry, "external "+registryFileName)
 			},
@@ -797,6 +848,7 @@ func mergeRegistries(embedded, external *ComponentRegistry) *ComponentRegistry {
 	return &ComponentRegistry{
 		APIVersion: embedded.APIVersion,
 		Kind:       embedded.Kind,
+		Metadata:   embedded.Metadata,
 		Components: mergeByName(embedded.Components, external.Components,
 			func(c ComponentConfig) string { return c.Name }),
 	}
@@ -826,7 +878,7 @@ type catalogForMerge struct {
 func (p *LayeredDataProvider) getMergedCatalog(ctx context.Context) ([]byte, error) {
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
-			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName, true,
 			nil, mergeCatalogs,
 		)
 	})
@@ -845,19 +897,25 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 	// ValidatorCatalog uses a separate API domain and is explicitly outside
 	// ADR-022. Preserve its existing advisory mismatch behavior until that
 	// schema defines its own compatibility policy.
-	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
+	if embedded.APIVersion != "" && external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
 		slog.Warn("external catalog has different API version",
 			"embedded", embedded.APIVersion,
 			"external", external.APIVersion)
 	}
 
-	return &catalogForMerge{
+	merged := &catalogForMerge{
 		APIVersion: embedded.APIVersion,
 		Kind:       embedded.Kind,
 		Metadata:   embedded.Metadata,
 		Validators: mergeByName(embedded.Validators, external.Validators,
 			func(v map[string]any) string { s, _ := v["name"].(string); return s }),
 	}
+	if embedded.APIVersion == "" && embedded.Kind == "" {
+		// The base shipped no validator catalog, so the external one supplies
+		// the document header.
+		merged.APIVersion, merged.Kind, merged.Metadata = external.APIVersion, external.Kind, external.Metadata
+	}
+	return merged
 }
 
 // defaultEmbeddedProvider is the singleton embedded-data provider used as the
