@@ -1405,9 +1405,12 @@ typically about 65s, and about 125s plus normal overhead in the worst case
 If privileged RBAC
 revocation also fails, both `ValidatePhase` and `ValidatePhases` return
 `ErrCodeInternal` with joined cancellation and cleanup causes and an explicit
-warning that the cluster-admin binding may be orphaned. Ordinary cancellation
-with successful privileged cleanup remains `ErrCodeCanceled`; other existing
-error precedence is unchanged. Resource deletion and ConfigMap persistence
+warning that the cluster-admin binding may be orphaned. A timeout
+(`ErrCodeTimeout`, such as the run's deadline) with a failed revocation is
+escalated the same way, since a possibly orphaned binding outranks why the run
+stopped. Ordinary cancellation or timeout with successful privileged cleanup
+remains `ErrCodeCanceled` or `ErrCodeTimeout`; other existing error precedence
+is unchanged. Resource deletion and ConfigMap persistence
 remain best effort; a partial report is still returned when persistence fails.
 Unstarted checks in the current phase are `skipped` with
 `not run: validation canceled`; a deadline instead says `not run: validation timed out`.
@@ -1435,7 +1438,7 @@ intact. The budget is checked before the output writer is created, never after,
 because creating a file output truncates it. Partial output is written only for
 an interruption (`ErrCodeCanceled`, or the combined cancellation-plus-revocation
 failure). Any other error that comes with results returns without output, as
-before. Context deadlines bound cooperative I/O, not arbitrary blocking
+before; that includes a timeout, with or without a failed revocation. Context deadlines bound cooperative I/O, not arbitrary blocking
 file/stdout writes. Ordinary cancellation before the last phase completed exits `9`;
 the combined privileged cleanup failure exits `8`, regardless of
 `--fail-on-error`. A signal that arrives after the last phase completed

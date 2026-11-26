@@ -348,7 +348,7 @@ discards them. When the run is interrupted (`ErrCodeCanceled` for a canceled
 `ctx`, `ErrCodeTimeout` for a deadline), the results hold every completed phase
 plus the partial current phase. Unstarted checks in it are `skipped`, and the
 phase reports a blocking status (`other` unless already `failed`). If
-privileged RBAC revocation also fails after a cancellation, the error is
+privileged RBAC revocation also fails after either interruption, the error is
 `ErrCodeInternal`, wrapping both causes and warning that the cluster-admin
 binding may be orphaned. Other errors, such as a later phase's pre-flight
 rejection, can also arrive alongside the phases completed before it. Partial

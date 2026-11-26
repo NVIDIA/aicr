@@ -691,73 +691,106 @@ func TestValidateCanceledApplyKeepsRBACThroughPodGrace(t *testing.T) {
 }
 
 func TestValidateCancellationWithRBACCleanup(t *testing.T) {
-	for _, singlePhase := range []bool{false, true} {
-		for _, cleanupFails := range []bool{false, true} {
-			name := map[bool]string{false: "ValidatePhases", true: "ValidatePhase"}[singlePhase] + "/" + map[bool]string{false: "revoked", true: "revocation fails"}[cleanupFails]
-			t.Run(name, func(t *testing.T) {
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-				cs := newFakeClusterClient()
-				cs.PrependReactor("patch", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
-					// Cancellation after setup preserves the partial phase and
-					// exercises the public entry point's deferred RBAC cleanup.
-					cancel()
-					return true, &corev1.ConfigMap{}, nil
-				})
-				revokeErr := stderrors.New("injected privileged revocation failure")
-				if cleanupFails {
-					cs.PrependReactor("delete", "clusterrolebindings", func(clienttesting.Action) (bool, runtime.Object, error) {
-						return true, nil, revokeErr
+	for _, deadline := range []bool{false, true} {
+		for _, singlePhase := range []bool{false, true} {
+			for _, cleanupFails := range []bool{false, true} {
+				name := map[bool]string{false: "canceled", true: "deadline"}[deadline] + "/" +
+					map[bool]string{false: "ValidatePhases", true: "ValidatePhase"}[singlePhase] + "/" +
+					map[bool]string{false: "revoked", true: "revocation fails"}[cleanupFails]
+				t.Run(name, func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						validateStoppedRunWithRBACCleanup(t, deadline, singlePhase, cleanupFails)
 					})
-				}
-				v := New(WithRunID("cancel-cleanup"), WithKubeconfig("in-memory"))
-				v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
-				var results []*PhaseResult
-				var err error
-				if singlePhase {
-					var result *PhaseResult
-					result, err = v.ValidatePhase(ctx, PhaseDeployment, nil, nil)
-					results = []*PhaseResult{result}
-				} else {
-					results, err = v.ValidatePhases(ctx, PhaseOrder, nil, nil)
-				}
-				wantCode, wantExit := errors.ErrCodeCanceled, errors.ExitCanceled
-				if cleanupFails {
-					wantCode, wantExit = errors.ErrCodeInternal, errors.ExitInternal
-					if !stderrors.Is(err, revokeErr) || !strings.Contains(err.Error(), "cluster-admin binding may be orphaned") {
-						t.Errorf("privileged cleanup failure lost: %v", err)
-					}
-				}
-				errorstest.WantReportedCode(t, err, wantCode)
-				if !stderrors.Is(err, context.Canceled) || errors.ExitCodeFromError(err) != wantExit {
-					t.Errorf("cancellation cause or exit code lost: %v (exit %d)", err, errors.ExitCodeFromError(err))
-				}
-				if len(results) != 1 || results[0] == nil || results[0].Report == nil || results[0].Status != ctrf.StatusOther {
-					t.Fatalf("partial results lost or later phases ran: %+v", results)
-				}
-			})
+				})
+			}
 		}
+	}
+}
+
+// validateStoppedRunWithRBACCleanup stops a run after setup, by cancellation or
+// by its deadline, and checks the error the public entry point returns once its
+// deferred RBAC cleanup has run.
+func validateStoppedRunWithRBACCleanup(t *testing.T, deadline, singlePhase, cleanupFails bool) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	cs := newFakeClusterClient()
+	cs.PrependReactor("patch", "configmaps", func(clienttesting.Action) (bool, runtime.Object, error) {
+		// Stopping after setup preserves the partial phase and exercises the
+		// public entry point's deferred RBAC cleanup. Inside the synctest bubble,
+		// waiting on ctx advances the fake clock to its deadline.
+		if deadline {
+			<-ctx.Done()
+		} else {
+			cancel()
+		}
+		return true, &corev1.ConfigMap{}, nil
+	})
+	revokeErr := stderrors.New("injected privileged revocation failure")
+	if cleanupFails {
+		cs.PrependReactor("delete", "clusterrolebindings", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, revokeErr
+		})
+	}
+	v := New(WithRunID("cancel-cleanup"), WithKubeconfig("in-memory"))
+	v.kubeClientFactory = func(string) (kubernetes.Interface, error) { return cs, nil }
+	var results []*PhaseResult
+	var err error
+	if singlePhase {
+		var result *PhaseResult
+		result, err = v.ValidatePhase(ctx, PhaseDeployment, nil, nil)
+		results = []*PhaseResult{result}
+	} else {
+		results, err = v.ValidatePhases(ctx, PhaseOrder, nil, nil)
+	}
+	wantCode, wantExit, wantCause, stopped := errors.ErrCodeCanceled, errors.ExitCanceled, context.Canceled, "canceled"
+	if deadline {
+		wantCode, wantExit, wantCause, stopped = errors.ErrCodeTimeout, errors.ExitTimeout, context.DeadlineExceeded, "timed out"
+	}
+	if cleanupFails {
+		wantCode, wantExit = errors.ErrCodeInternal, errors.ExitInternal
+		if !stderrors.Is(err, revokeErr) ||
+			!strings.Contains(err.Error(), "validation "+stopped+" and privileged RBAC revocation failed; cluster-admin binding may be orphaned") {
+
+			t.Errorf("privileged cleanup failure lost: %v", err)
+		}
+	}
+	errorstest.WantReportedCode(t, err, wantCode)
+	if !stderrors.Is(err, wantCause) || errors.ExitCodeFromError(err) != wantExit {
+		t.Errorf("stop cause or exit code lost: %v (exit %d)", err, errors.ExitCodeFromError(err))
+	}
+	if len(results) != 1 || results[0] == nil || results[0].Report == nil || results[0].Status != ctrf.StatusOther {
+		t.Fatalf("partial results lost or later phases ran: %+v", results)
 	}
 }
 
 func TestClusterCleanupErrorPrecedence(t *testing.T) {
 	cleanupErr := errors.New(errors.ErrCodeInternal, "revocation failed")
+	canceled := errors.WrapCtxErr(context.Canceled, errors.ErrCodeTimeout, "canceled")
+	timedOut := errors.WrapCtxErr(context.DeadlineExceeded, errors.ErrCodeTimeout, "timeout")
 	for _, tt := range []struct {
 		name       string
 		runErr     error
 		cleanupErr error
 		code       errors.ErrorCode
+		// keepsCleanup reports whether the cleanup cause must reach the caller.
+		keepsCleanup bool
 	}{
-		{"success with cleanup failure", nil, cleanupErr, errors.ErrCodeInternal},
-		{"ordinary cancellation", errors.WrapCtxErr(context.Canceled, errors.ErrCodeTimeout, "canceled"), nil, errors.ErrCodeCanceled},
-		{"timeout precedence unchanged", errors.WrapCtxErr(context.DeadlineExceeded, errors.ErrCodeTimeout, "timeout"), cleanupErr, errors.ErrCodeTimeout},
-		{"outer unavailable overrides nested cancellation", errors.Wrap(errors.ErrCodeUnavailable, "unavailable", errors.WrapCtxErr(context.Canceled, errors.ErrCodeTimeout, "inner")), cleanupErr, errors.ErrCodeUnavailable},
+		{"success with cleanup failure", nil, cleanupErr, errors.ErrCodeInternal, true},
+		{"ordinary cancellation", canceled, nil, errors.ErrCodeCanceled, false},
+		{"ordinary timeout", timedOut, nil, errors.ErrCodeTimeout, false},
+		{"cancellation with failed revocation", canceled, cleanupErr, errors.ErrCodeInternal, true},
+		{"timeout with failed revocation", timedOut, cleanupErr, errors.ErrCodeInternal, true},
+		{"outer unavailable overrides nested cancellation", errors.Wrap(errors.ErrCodeUnavailable, "unavailable", errors.WrapCtxErr(context.Canceled, errors.ErrCodeTimeout, "inner")), cleanupErr, errors.ErrCodeUnavailable, false},
+		{"outer unavailable overrides nested timeout", errors.Wrap(errors.ErrCodeUnavailable, "unavailable", errors.WrapCtxErr(context.DeadlineExceeded, errors.ErrCodeTimeout, "inner")), cleanupErr, errors.ErrCodeUnavailable, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := New().clusterCleanupError(tt.runErr, tt.cleanupErr)
 			errorstest.WantReportedCode(t, err, tt.code)
-			if tt.runErr != nil && tt.cleanupErr != nil && stderrors.Is(err, cleanupErr) {
-				t.Errorf("non-cancellation error precedence changed: %v", err)
+			if kept := tt.cleanupErr != nil && stderrors.Is(err, tt.cleanupErr); kept != tt.keepsCleanup {
+				t.Errorf("cleanup cause kept = %v, want %v: %v", kept, tt.keepsCleanup, err)
+			}
+			if tt.runErr != nil && !stderrors.Is(err, tt.runErr) {
+				t.Errorf("run error lost: %v", err)
 			}
 		})
 	}

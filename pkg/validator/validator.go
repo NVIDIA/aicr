@@ -288,9 +288,10 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) error {
 	return rbacErr
 }
 
-// clusterCleanupError preserves existing error precedence except when operator
-// cancellation coincides with a failed privileged revocation: both causes must
-// reach the caller with the potentially orphaned binding classified as internal.
+// clusterCleanupError preserves existing error precedence except when a run
+// stopped by cancellation or a timeout also fails its privileged revocation:
+// both causes must reach the caller with the potentially orphaned binding
+// classified as internal, since that binding outranks why the run stopped.
 func (v *Validator) clusterCleanupError(runErr, cleanupErr error) error {
 	if cleanupErr == nil {
 		return runErr
@@ -298,9 +299,15 @@ func (v *Validator) clusterCleanupError(runErr, cleanupErr error) error {
 	if runErr == nil {
 		return cleanupErr
 	}
-	if reported, ok := stderrors.AsType[*errors.StructuredError](runErr); ok && reported.Code == errors.ErrCodeCanceled {
+	if reported, ok := stderrors.AsType[*errors.StructuredError](runErr); ok &&
+		(reported.Code == errors.ErrCodeCanceled || reported.Code == errors.ErrCodeTimeout) {
+
+		stopped := "canceled"
+		if reported.Code == errors.ErrCodeTimeout {
+			stopped = "timed out"
+		}
 		return errors.WrapWithContext(errors.ErrCodeInternal,
-			"validation canceled and privileged RBAC revocation failed; cluster-admin binding may be orphaned",
+			"validation "+stopped+" and privileged RBAC revocation failed; cluster-admin binding may be orphaned",
 			stderrors.Join(runErr, cleanupErr),
 			map[string]any{keyRunID: v.RunID, "namespace": v.Namespace})
 	}
