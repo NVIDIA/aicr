@@ -117,8 +117,9 @@ type mirrorCandidate struct {
 //
 // Each component also contributes the images its images.yaml declares for the
 // chart version or vendored operator image it deploys, such as images its
-// operator launches at run time. A component whose images.yaml is unreadable
-// or has no matching entry gets a warning.
+// operator launches at run time. An images.yaml that is unreadable or has no
+// matching entry is a warning on the component. A malformed one is a fatal
+// error.
 //
 // A component whose values cannot be hydrated is a fatal error, not a warning.
 // The returned MirrorList is a completeness claim — the full set of images an

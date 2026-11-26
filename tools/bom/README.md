@@ -28,7 +28,7 @@ From the repo root:
 # Default — writes to dist/bom/
 make bom
 
-# Skip helm rendering (manifest-only, no network needed)
+# Skip helm rendering (embedded manifests and declared images only, no network needed)
 BOM_SKIP_HELM=1 make bom
 
 # Fail on unpinned chart versions, render errors, or an unreadable Knative operator image
@@ -76,7 +76,7 @@ supply-chain dashboards without conversion.
 ## Limitations
 
 - Charts that fail to render (missing required values, network unreachable)
-  emit a warning property on the component and contribute zero images. Use
+  emit a warning property on the component and contribute no rendered images. Use
   `-strict` to make these fatal. `make bom-docs` always runs strict. Render
   failures are retried up to three times before they count.
 - A component's `images.yaml` with no entry for a surveyed chart version or

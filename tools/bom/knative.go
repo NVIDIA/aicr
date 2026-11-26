@@ -43,21 +43,21 @@ import (
 const (
 	knativeOperatorComponent = "knative-operator"
 	knativeServingValues     = "components/knative-serving/values.yaml"
-
-	// knativeOperatorRepository is the repository of the operator image the
-	// knative-operator chart deploys. The image holds the manifests the
-	// operator applies under knativeKodataRoot.
-	knativeOperatorRepository = "gcr.io/knative-releases/knative.dev/operator/cmd/operator"
-	knativeKodataRoot         = "var/run/ko"
-
-	// knativeIngress is the ingress the knative-serving KnativeServing
-	// resource enables.
-	knativeIngress = "kourier"
+	knativeKodataRoot        = "var/run/ko"
 
 	imageReadTimeout    = 10 * time.Minute
 	maxImageFileBytes   = 16 << 20
 	imageReadContextKey = "image"
 )
+
+// knativeOperatorRepository is the repository of the operator image the
+// knative-operator chart deploys. The image holds the manifests the operator
+// applies under knativeKodataRoot.
+const knativeOperatorRepository = "gcr.io/knative-releases/knative.dev/operator/cmd/operator"
+
+// knativeIngress is the ingress the knative-serving KnativeServing resource
+// enables.
+const knativeIngress = "kourier"
 
 // imageFileReader returns the files directly under each of dirs in the
 // linux/amd64 variant of image, keyed by path.

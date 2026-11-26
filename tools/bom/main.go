@@ -102,7 +102,7 @@ func main() {
 	flag.StringVar(&repoRoot, "repo-root", ".", "path to the AICR repository root")
 	flag.StringVar(&outDir, "out-dir", "dist/bom", "directory to write bom.cdx.json and bom.md")
 	flag.StringVar(&aicrVersion, "aicr-version", "dev", "AICR version label embedded in the BOM")
-	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only walk embedded manifests)")
+	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only read embedded manifests and declared images)")
 	flag.BoolVar(&strict, "strict", false, "fail on unpinned charts, render errors, an unreadable Knative operator image, or a Helm chart that renders no images and is not in expectedNoImages")
 	flag.BoolVar(&deterministic, "deterministic", false, "suppress per-run metadata (timestamps, version churn) in the Markdown output for committable artifacts")
 	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
