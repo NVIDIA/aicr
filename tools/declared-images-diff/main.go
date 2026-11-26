@@ -23,6 +23,11 @@
 // repository and tag. The digest of a running image comes from its reference,
 // or else from the SHA-256 hash k8s-aibom records for it.
 //
+// A tag-only listed image does not prove that mirroring its tag fetches the
+// digest the cluster runs, since a tag can move. Each running image covered
+// that way is logged as digest-unverified. With -require-digest it is reported
+// as not covered instead.
+//
 // It runs offline on exported files. It exits 1 when a running image is not
 // covered, and 2 when an input cannot be read, a BOM is not held inline, or
 // the inputs hold no running container image.
@@ -31,7 +36,7 @@
 //
 //	aicr mirror list --recipe recipe.yaml --format json > mirror.json
 //	kubectl get aiboms -A -o json > aiboms.json
-//	go run ./tools/declared-images-diff -mirror-list mirror.json -aibom aiboms.json
+//	go run ./tools/declared-images-diff -mirror-list mirror.json -aibom aiboms.json [-require-digest]
 //
 // Each -aibom file is either one CycloneDX JSON document or a Kubernetes list
 // of AIBOM resources, whose status.bomDocument.inline.data holds the document.
@@ -64,73 +69,94 @@ var imageReferenceProperties = []string{"k8s-aibom:image:reference", "image.refe
 
 func main() {
 	var (
-		mirrorList string
-		aiboms     []string
+		mirrorList    string
+		aiboms        []string
+		requireDigest bool
 	)
 	flag.StringVar(&mirrorList, "mirror-list", "", "`aicr mirror list` output, YAML or JSON")
 	flag.Func("aibom", "CycloneDX document or AIBOM list exported from the cluster, repeatable", func(v string) error {
 		aiboms = append(aiboms, v)
 		return nil
 	})
+	flag.BoolVar(&requireDigest, "require-digest", false,
+		"report a running image pinned by digest as not covered when only a tag-only listed image matches it")
 	flag.Parse()
 
-	uncovered, err := run(mirrorList, aiboms)
+	res, err := run(mirrorList, aiboms, requireDigest)
 	if err != nil {
 		slog.Error("compare runtime images", "error", err)
 		os.Exit(2)
 	}
-	for _, i := range uncovered {
+	for _, i := range res.tagOnly {
+		slog.Warn("covered by a tag-only listed image, digest not verified", "image", i)
+	}
+	for _, i := range res.uncovered {
 		fmt.Println(i)
 	}
-	if len(uncovered) > 0 {
-		slog.Error("running images not covered by the mirror list", "count", len(uncovered))
+	if len(res.uncovered) > 0 {
+		slog.Error("running images not covered by the mirror list", "count", len(res.uncovered))
 		os.Exit(1)
 	}
-	slog.Info("every running image is covered by the mirror list")
+	slog.Info("every running image is covered by the mirror list", "digestUnverified", len(res.tagOnly))
 }
 
-// run returns the sorted running images in the aibom files that the mirror
-// list does not cover.
-func run(mirrorListPath string, aibomPaths []string) ([]string, error) {
+// result holds the sorted running images the mirror list does not cover, and
+// those it covers only by a tag-only listed image.
+type result struct {
+	uncovered []string
+	tagOnly   []string
+}
+
+// run compares the running images in the aibom files with the mirror list.
+// With requireDigest, a running image covered only by tag is not covered.
+func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result, error) {
 	if mirrorListPath == "" || len(aibomPaths) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "-mirror-list and at least one -aibom are required")
+		return result{}, errors.New(errors.ErrCodeInvalidRequest, "-mirror-list and at least one -aibom are required")
 	}
 	data, err := readBounded(mirrorListPath)
 	if err != nil {
-		return nil, err
+		return result{}, err
 	}
 	covered, err := mirrorKeys(data)
 	if err != nil {
-		return nil, err
+		return result{}, err
 	}
 
 	seen := 0
 	uncovered := map[string]struct{}{}
+	tagOnly := map[string]struct{}{}
 	for _, p := range aibomPaths {
 		data, err := readBounded(p)
 		if err != nil {
-			return nil, err
+			return result{}, err
 		}
 		running, err := runningImages(data)
 		if err != nil {
-			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read "+p)
+			return result{}, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read "+p)
 		}
 		seen += len(running)
 		for _, ref := range running {
-			ok, err := covered.covers(ref)
+			m, err := covered.covers(ref)
 			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("running image %q in %s", ref, p), err)
+				return result{}, errors.Wrap(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("running image %q in %s", ref, p), err)
 			}
-			if !ok {
+			switch {
+			case m == matchNone, m == matchTagOnly && requireDigest:
 				uncovered[ref] = struct{}{}
+			case m == matchTagOnly:
+				tagOnly[ref] = struct{}{}
 			}
 		}
 	}
 	if seen == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
+		return result{}, errors.New(errors.ErrCodeInvalidRequest,
 			"the -aibom inputs hold no running container image, so there is nothing to compare")
 	}
-	return slices.Sorted(maps.Keys(uncovered)), nil
+	return result{
+		uncovered: slices.Sorted(maps.Keys(uncovered)),
+		tagOnly:   slices.Sorted(maps.Keys(tagOnly)),
+	}, nil
 }
 
 // readBounded reads path, rejecting a file larger than defaults.MaxBOMBytes.
@@ -159,19 +185,35 @@ type imageKeys struct {
 	digests map[string]struct{}
 }
 
-// covers reports whether a listed image covers the running reference ref.
-func (k imageKeys) covers(ref string) (bool, error) {
+// match is how a listed image covers a running image. matchTagOnly means a
+// running image pinned by digest matches only a listed image without one.
+type match int
+
+const (
+	matchNone match = iota
+	matchTagOnly
+	matchExact
+)
+
+// covers reports how the listed images cover the running reference ref.
+func (k imageKeys) covers(ref string) (match, error) {
 	tag, digest, err := refKeys(ref)
 	if err != nil {
-		return false, err
+		return matchNone, err
 	}
 	if digest != "" {
-		_, byDigest := k.digests[digest]
-		_, byTag := k.tagOnly[tag]
-		return byDigest || (tag != "" && byTag), nil
+		if _, ok := k.digests[digest]; ok {
+			return matchExact, nil
+		}
+		if _, ok := k.tagOnly[tag]; tag != "" && ok {
+			return matchTagOnly, nil
+		}
+		return matchNone, nil
 	}
-	_, byTag := k.tags[tag]
-	return byTag, nil
+	if _, ok := k.tags[tag]; ok {
+		return matchExact, nil
+	}
+	return matchNone, nil
 }
 
 // mirrorKeys returns the match keys of every image in an `aicr mirror list`

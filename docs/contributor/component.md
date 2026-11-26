@@ -615,7 +615,10 @@ go run ./tools/declared-images-diff -mirror-list mirror.json -aibom aiboms.json
 ```
 
 It prints each running image the list does not cover, and exits 1 if
-there is one. The output also includes the workloads' own images, such
+there is one. A running image pinned by digest that matches only a
+tag-only listed image counts as covered, and is logged as
+digest-unverified, since its tag may have moved. Add `-require-digest`
+to report it as not covered. The output also includes the workloads' own images, such
 as a model server, which no component declares. Add an entry only for an
 image a component's operator launches or injects.
 

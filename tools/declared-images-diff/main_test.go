@@ -98,22 +98,31 @@ func TestRun(t *testing.T) {
    "properties": [{"name": "image.reference", "value": "busybox"}]}]}`
 
 	tests := []struct {
-		name     string
-		mirror   string
-		aiboms   []string
-		want     []string
-		wantCode errors.ErrorCode // empty when no error is expected
-		wantMsg  string
+		name          string
+		mirror        string
+		aiboms        []string
+		requireDigest bool
+		want          []string
+		wantTagOnly   []string
+		wantCode      errors.ErrorCode // empty when no error is expected
+		wantMsg       string
 	}{
 		{
 			name:   "CycloneDX document",
 			mirror: mirrorYAML, aiboms: []string{workloadBOM},
-			want: []string{"example.com/op/missing:2.0"},
+			want:        []string{"example.com/op/missing:2.0"},
+			wantTagOnly: []string{"example.com/op/agent:1.0.0@" + digest},
+		},
+		{
+			name:   "require digest reports a tag-only match as not covered",
+			mirror: mirrorYAML, aiboms: []string{workloadBOM}, requireDigest: true,
+			want: []string{"example.com/op/agent:1.0.0@" + digest, "example.com/op/missing:2.0"},
 		},
 		{
 			name:   "AIBOM list, untagged image resolves to latest",
 			mirror: mirrorYAML, aiboms: []string{aibomList(workloadBOM, extraBOM)},
-			want: []string{"busybox", "example.com/op/missing:2.0"},
+			want:        []string{"busybox", "example.com/op/missing:2.0"},
+			wantTagOnly: []string{"example.com/op/agent:1.0.0@" + digest},
 		},
 		{
 			name:   "every running image covered",
@@ -130,7 +139,8 @@ func TestRun(t *testing.T) {
   {"type": "container", "bom-ref": "b", "name": "locked",
     "hashes": [{"alg": "SHA-256", "content": "` + strings.TrimPrefix(otherDigest, "sha256:") + `"}],
     "properties": [{"name": "k8s-aibom:image:reference", "value": "example.com/op/locked:2.0"}]}]}`},
-			want: []string{"example.com/op/locked:2.0@" + otherDigest},
+			want:        []string{"example.com/op/locked:2.0@" + otherDigest},
+			wantTagOnly: []string{"example.com/op/agent:1.0.0@" + otherDigest},
 		},
 		{
 			name:   "k8s-aibom v1.7.0 reference property",
@@ -215,7 +225,7 @@ func TestRun(t *testing.T) {
 			for i, a := range tt.aiboms {
 				aiboms = append(aiboms, writeFile(t, dir, "aibom"+string(rune('0'+i))+".json", a))
 			}
-			got, err := run(mirror, aiboms)
+			got, err := run(mirror, aiboms, tt.requireDigest)
 			if tt.wantCode != "" {
 				if err == nil {
 					t.Fatalf("run() = %v, want %s error", got, tt.wantCode)
@@ -229,8 +239,11 @@ func TestRun(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run() error = %v", err)
 			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("run() = %v, want %v", got, tt.want)
+			if !slices.Equal(got.uncovered, tt.want) {
+				t.Errorf("run() uncovered = %v, want %v", got.uncovered, tt.want)
+			}
+			if !slices.Equal(got.tagOnly, tt.wantTagOnly) {
+				t.Errorf("run() tagOnly = %v, want %v", got.tagOnly, tt.wantTagOnly)
 			}
 		})
 	}
@@ -265,7 +278,7 @@ func TestRunInputErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := run(tt.mirror, tt.aiboms)
+			_, err := run(tt.mirror, tt.aiboms, false)
 			if err == nil {
 				t.Fatal("run() error = nil, want an input error")
 			}
