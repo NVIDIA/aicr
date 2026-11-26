@@ -259,7 +259,7 @@ func TestSurveyComponentsVerifiesKnative(t *testing.T) {
 	}
 }
 
-func TestYAMLFilesInTar(t *testing.T) {
+func TestFilesInTar(t *testing.T) {
 	type entry struct {
 		name string
 		body string
@@ -289,47 +289,49 @@ func TestYAMLFilesInTar(t *testing.T) {
 	}
 	dirs := []string{"var/run/ko/a"}
 
-	t.Run("selects .yaml files directly under dirs", func(t *testing.T) {
-		got, err := yamlFilesInTar(build(
+	t.Run("selects regular files directly under dirs", func(t *testing.T) {
+		got, err := filesInTar(build(
 			entry{"/var/run/ko/a", "", tar.TypeDir},
 			entry{"/var/run/ko/a/x.yaml", "x", tar.TypeReg},
 			entry{"./var/run/ko/a/y.yaml", "y", tar.TypeReg},
 			entry{"var/run/ko/a/z.txt", "z", tar.TypeReg},
+			entry{"var/run/ko/a/u.yml", "u", tar.TypeReg},
+			entry{"var/run/ko/a/sub", "", tar.TypeDir},
 			entry{"var/run/ko/a/sub/w.yaml", "w", tar.TypeReg},
 			entry{"var/run/ko/b/v.yaml", "v", tar.TypeReg},
 		), dirs)
 		if err != nil {
-			t.Fatalf("yamlFilesInTar() error = %v", err)
+			t.Fatalf("filesInTar() error = %v", err)
 		}
-		want := []string{"var/run/ko/a/x.yaml", "var/run/ko/a/y.yaml"}
-		if keys := slices.Sorted(maps.Keys(got)); !slices.Equal(keys, want) || string(got[want[1]]) != "y" {
-			t.Errorf("yamlFilesInTar() = %q, want files %v", got, want)
+		want := []string{"var/run/ko/a/u.yml", "var/run/ko/a/x.yaml", "var/run/ko/a/y.yaml", "var/run/ko/a/z.txt"}
+		if keys := slices.Sorted(maps.Keys(got)); !slices.Equal(keys, want) || string(got[want[2]]) != "y" {
+			t.Errorf("filesInTar() = %q, want files %v", got, want)
 		}
 	})
 	for _, e := range []entry{
 		{"var/run/ko/a/link.yaml", "", tar.TypeSymlink},
 		{"var/run/ko/a/hard.yaml", "", tar.TypeLink},
-		{"var/run/ko/a/x.yml", "x", tar.TypeReg},
+		{"var/run/ko/a/pipe", "", tar.TypeFifo},
 	} {
 		t.Run("rejects "+path.Base(e.name), func(t *testing.T) {
-			_, err := yamlFilesInTar(build(e), dirs)
+			_, err := filesInTar(build(e), dirs)
 			if err == nil {
-				t.Fatal("yamlFilesInTar() error = nil, want an unchecked-file error")
+				t.Fatal("filesInTar() error = nil, want an unchecked-file error")
 			}
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 		})
 	}
 	t.Run("oversized file", func(t *testing.T) {
-		_, err := yamlFilesInTar(build(entry{"var/run/ko/a/big.yaml", strings.Repeat("x", maxImageFileBytes+1), tar.TypeReg}), dirs)
+		_, err := filesInTar(build(entry{"var/run/ko/a/big.yaml", strings.Repeat("x", maxImageFileBytes+1), tar.TypeReg}), dirs)
 		if err == nil {
-			t.Fatal("yamlFilesInTar() error = nil, want a size error")
+			t.Fatal("filesInTar() error = nil, want a size error")
 		}
 		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 	})
 	t.Run("corrupt stream", func(t *testing.T) {
-		_, err := yamlFilesInTar(strings.NewReader("not a tar stream, but long enough to need a full header block"), dirs)
+		_, err := filesInTar(strings.NewReader("not a tar stream, but long enough to need a full header block"), dirs)
 		if err == nil {
-			t.Fatal("yamlFilesInTar() error = nil, want a read error")
+			t.Fatal("filesInTar() error = nil, want a read error")
 		}
 		errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
 	})

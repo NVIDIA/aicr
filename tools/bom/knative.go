@@ -59,7 +59,7 @@ const (
 	imageReadContextKey = "image"
 )
 
-// imageFileReader returns the .yaml files directly under each of dirs in the
+// imageFileReader returns the files directly under each of dirs in the
 // linux/amd64 variant of image, keyed by path.
 type imageFileReader func(ctx context.Context, image string, dirs []string) (map[string][]byte, error)
 
@@ -229,13 +229,14 @@ func readImageFiles(ctx context.Context, image string, dirs []string) (map[strin
 	}
 	rc := mutate.Extract(img)
 	defer rc.Close()
-	return yamlFilesInTar(rc, dirs)
+	return filesInTar(rc, dirs)
 }
 
-// yamlFilesInTar returns the regular .yaml files directly under each of dirs
-// in the tar stream r, keyed by path. A file larger than maxImageFileBytes is
-// an error.
-func yamlFilesInTar(r io.Reader, dirs []string) (map[string][]byte, error) {
+// filesInTar returns the regular files directly under each of dirs in the tar
+// stream r, keyed by path. The operator parses every file in those
+// directories whatever its extension, so a link or other non-regular entry is
+// an error, as is a file larger than maxImageFileBytes.
+func filesInTar(r io.Reader, dirs []string) (map[string][]byte, error) {
 	files := map[string][]byte{}
 	tr := tar.NewReader(r)
 	for {
@@ -247,14 +248,11 @@ func yamlFilesInTar(r io.Reader, dirs []string) (map[string][]byte, error) {
 			return nil, errors.Wrap(errors.ErrCodeUnavailable, "read image filesystem", err)
 		}
 		file := strings.TrimPrefix(path.Clean("/"+hdr.Name), "/")
-		if !slices.Contains(dirs, path.Dir(file)) {
+		if !slices.Contains(dirs, path.Dir(file)) || hdr.Typeflag == tar.TypeDir {
 			continue
 		}
-		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink || path.Ext(file) == ".yml" {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, file+" is not a regular .yaml file, so its images would go unchecked")
-		}
-		if hdr.Typeflag != tar.TypeReg || path.Ext(file) != yamlExt {
-			continue
+		if hdr.Typeflag != tar.TypeReg {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, file+" is not a regular file, so its images would go unchecked")
 		}
 		data, err := io.ReadAll(io.LimitReader(tr, maxImageFileBytes+1))
 		if err != nil {

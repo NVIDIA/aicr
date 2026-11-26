@@ -91,11 +91,12 @@ supply-chain dashboards without conversion.
   default render.
 - The `knative-operator` entry must list exactly the images in the Serving
   and Kourier manifests its operator image carries for the Serving release
-  `knative-serving` requests. The run pulls that image to compare them. It
-  fails in every mode on any difference, a linked or `.yml` manifest, a
-  manifest over 16 MiB, or a missing Serving or Kourier directory. A failure
-  to fetch or read the image is a warning, so it fails only under `-strict`. `-skip-helm` skips the check, as does any
-  warning already on the `knative-operator` result.
+  `knative-serving` requests. The run pulls that image and reads every file
+  in those directories, as the operator does. It fails in every mode on any
+  difference, a link or other non-regular file, a file over 16 MiB, or a
+  missing Serving or Kourier directory. A failure to fetch or read the image
+  is a warning, so it fails only under `-strict`. `-skip-helm` skips the
+  check, as does any warning already on the `knative-operator` result.
 - A Helm chart that legitimately renders no images (CRD-only charts) must be
   listed in `expectedNoImages` in `main.go`, with a reason. Under `-strict`,
   an unlisted chart with zero images fails, and a listed chart that starts
