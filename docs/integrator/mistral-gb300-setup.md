@@ -14,12 +14,9 @@ and its NFD install drive the fabric and the storage clients, which select
 nodes by the Network Operator's MOFED readiness label. The recipe therefore
 never installs the Network Operator or NFD.
 
-The GPU Operator option is the `gpuStack` profile:
-
-| Value | Cluster created with | Recipe installs the GPU Operator |
-|---|---|---|
-| `mistral-managed` (default) | the GPU Operator option | no |
-| `operator-managed` | no GPU Operator option | yes, with the generic GB300 values |
+The GPU Operator option is the `gpuStack` profile. Its one value,
+`mistral-managed` (the default), is a cluster created with that option: the
+recipe installs no GPU Operator.
 
 Under `mistral-managed` the recipe records an external `nvidia.com/gpu`
 advertiser and also leaves out Prometheus Adapter, pending a qualified scrape
@@ -28,10 +25,12 @@ of Mistral's DCGM exporter. Snapshot-based generation requires
 `true`, so a cluster created without Mistral's GPU Operator fails closed
 instead of resolving to a bundle with no GPU stack.
 
-`operator-managed` has no snapshot check for the opposite case. Mistral's
-GPU Operator installs as Helm release `gpu-operator` in namespace
-`gpu-operator`, the same coordinates the recipe uses, so do not select
-`operator-managed` on a cluster created with the GPU Operator option.
+A cluster created without Mistral's GPU Operator option is not covered yet.
+A value that installs the GPU Operator needs a snapshot check that tells
+Mistral's installation apart from AICR's. Mistral's GPU Operator installs as
+Helm release `gpu-operator` in namespace `gpu-operator` with plain Helm
+labels, the same coordinates the recipe would use, so no such check exists
+today.
 
 ## Generate and inspect
 
@@ -43,17 +42,6 @@ Mistral nodes are provisioned by Metal3. A snapshot resolves
 aicr snapshot --node-selector nvidia.com/gpu.present=true --output snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
 aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundle
-```
-
-For a cluster created without Mistral's GPU Operator, select the opt-in value
-and target a node by name, since `nvidia.com/gpu.present` is set only once a
-GPU Operator runs:
-
-```bash
-GPU_NODE="gb300-node-1"  # replace with a GB300 node name
-aicr snapshot --node-selector "kubernetes.io/hostname=${GPU_NODE}" --output snapshot.yaml
-aicr recipe --snapshot snapshot.yaml --intent training \
-  --profile gpuStack=operator-managed --output recipe.yaml
 ```
 
 Criteria-only generation records the provider checks without observing a

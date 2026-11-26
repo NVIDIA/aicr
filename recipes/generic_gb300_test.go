@@ -51,7 +51,6 @@ func TestGenericGB300DevicePluginMOFEDStaysOff(t *testing.T) {
 		profile string
 	}{
 		{service: recipe.CriteriaServiceGeneric},
-		{service: recipe.CriteriaServiceMistral, profile: "gpuStack=operator-managed"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.service), func(t *testing.T) {

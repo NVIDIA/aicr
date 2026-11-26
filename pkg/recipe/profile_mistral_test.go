@@ -59,7 +59,6 @@ func TestMistralGPUStackProfile(t *testing.T) {
 	}{
 		{selection: "", wantValue: "mistral-managed", wantAdvertiser: allocpolicy.AdvertiserExternal},
 		{selection: "gpuStack=mistral-managed", wantValue: "mistral-managed", wantAdvertiser: allocpolicy.AdvertiserExternal},
-		{selection: "gpuStack=operator-managed", wantValue: "operator-managed", wantGPUStack: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.wantValue+"/"+tt.selection, func(t *testing.T) {
@@ -206,5 +205,15 @@ func TestMistralEmittedRecipeReloads(t *testing.T) {
 	}
 	if err := missing.ValidateProfileValuesWithContext(t.Context()); err == nil {
 		t.Fatal("an absent component owned only through enabled must still fail")
+	}
+}
+
+// TestMistralRejectsOperatorManaged fails when the Mistral recipe accepts a
+// value that installs the GPU Operator before a signal distinguishes the two
+// installers (ADR-015).
+func TestMistralRejectsOperatorManaged(t *testing.T) {
+	t.Parallel()
+	if _, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), mistralCriteria(), "gpuStack=operator-managed"); err == nil {
+		t.Fatal("gpuStack=operator-managed resolved; want an unknown-value error")
 	}
 }

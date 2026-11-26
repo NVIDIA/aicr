@@ -39,9 +39,9 @@ spec:
       Which installer owns the GPU Operator. "mistral-managed" (the default)
       is a cluster created with Mistral's GPU Operator option: the recipe
       installs no GPU Operator, and Mistral's device plugin advertises
-      nvidia.com/gpu. "operator-managed" is a cluster created without it:
-      the recipe installs the GPU Operator with the generic GB300 values.
-      The Network Operator and NFD are Mistral's in both values.
+      nvidia.com/gpu. The Network Operator and NFD are Mistral's. A value
+      that installs the GPU Operator waits for a signal that tells Mistral's
+      installation apart from AICR's (ADR-015).
     default: mistral-managed
     values:
       mistral-managed:
@@ -64,27 +64,13 @@ spec:
             value: "true"
             remediation: >-
               mistral-managed expects the GPU driver from Mistral's GPU
-              Operator. Create the cluster with that option, or select
-              --profile gpuStack=operator-managed.
+              Operator. Create the cluster with that option.
           - name: K8s.policy.devicePlugin.enabled
             value: "true"
             remediation: >-
               mistral-managed expects a ClusterPolicy from Mistral's GPU
               Operator with its device plugin enabled. Create the cluster
-              with that option, or select --profile
-              gpuStack=operator-managed.
-      operator-managed:
-        componentRefs:
-          - name: gpu-operator
-            overrides:
-              install: true
-          - name: prometheus-adapter
-            overrides:
-              install: true
-          - name: nvsentinel
-            optional: true
-            overrides:
-              labeler: {assumeDriverInstalled: false}
+              with that option.
 
   componentRefs:
     - name: gpu-operator

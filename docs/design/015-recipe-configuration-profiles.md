@@ -1131,7 +1131,8 @@ honours:
   already requires.
 
 ```yaml
-# recipes/overlays/gb300-mistral-ubuntu-training.yaml (excerpt)
+# Illustrative: the shipped Mistral GB300 overlay declares only mistral-managed
+# until operator-managed has a signal that distinguishes the two installers.
 profile:
   name: gpuStack
   default: mistral-managed
