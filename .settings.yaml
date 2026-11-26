@@ -84,14 +84,14 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.122.0'
+  grype: 'v0.122.1'
   # The release image checks (.github/actions/image-checks) install this Grype
   # directly rather than through anchore/scan-action, whose bundled default
   # would otherwise decide the scanner, and one run writes both the SARIF and
   # the JSON report that names the vulnerability database. Refreshed by
   # tools/update-grype-checksums via Renovate postUpgradeTasks; flat,
   # uniquely-named key for the reason given on oras_sha256_linux_amd64.
-  grype_sha256_linux_amd64: 'e697e6f7224637df87e267e4318cc027feae99a8e1b80280241d32b9ee5d4920'
+  grype_sha256_linux_amd64: 'f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538'
   # Secret scan of the release images (.github/actions/image-checks, ruleset
   # .gitleaks.toml). Installed from the release binary; gitleaks/gitleaks-action
   # is not used.
