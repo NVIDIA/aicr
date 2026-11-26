@@ -85,7 +85,7 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 		sets := b.getValueOverridesForComponent(ref.Name, rr.DataProvider())
 		typed := b.getTypedValueOverridesForComponent(ref.Name, rr.DataProvider())
 		skip := func(path string) bool {
-			return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path)
+			return p.recipeSets(path) || overrideReaches(sets, path) || typedOverrideWrites(typed, path)
 		}
 		if err := sizeComponent(ref, values, skip, sz, n); err != nil {
 			return sizingPlan{}, err
@@ -124,7 +124,7 @@ func (b *DefaultBundler) installRows(p sizingPlan, ref *recipe.ComponentRef, val
 	typed := b.getTypedValueOverridesForComponent(ref.Name, provider)
 	dynamic := b.dynamicPathSetFor(ref.Name, provider)
 	skip := func(path string) bool {
-		return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path) ||
+		return p.recipeSets(path) || overrideReaches(sets, path) || typedOverrideWrites(typed, path) ||
 			overrideReaches(dynamic, path)
 	}
 	return buildRows(ref, values, skip, p.file, b.Config.EstimatedNodeCount())
@@ -387,6 +387,30 @@ func setsPathOrAncestor(m map[string]any, path string) bool {
 func lockReaches(locked []string, path string) bool {
 	for _, l := range locked {
 		if recipe.PathsIntersect(l, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// typedOverrideWrites reports whether a --set-json or --set-file override
+// writes path. An object value at an ancestor deep-merges, so it writes path
+// only when it sets the remaining keys or replaces one on the way; any other
+// value at an ancestor, or a value at or below path, replaces it.
+func typedOverrideWrites(typed map[string]any, path string) bool {
+	for p, v := range typed {
+		if !recipe.PathsIntersect(p, path) {
+			continue
+		}
+		rest, isAncestor := strings.CutPrefix(path, p+".")
+		if !isAncestor {
+			return true
+		}
+		obj, isMap := v.(map[string]any)
+		if !isMap {
+			return true
+		}
+		if setsPathOrAncestor(obj, rest) {
 			return true
 		}
 	}

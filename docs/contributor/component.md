@@ -95,6 +95,7 @@ operator:
 - `validations:` — bundle-time misconfiguration warnings ([validator.md](validator.md#component-validations-bundle-time))
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
 - `upgrades.file:` — path to a `ComponentUpgrades` transition record ([recipe.md](recipe.md#transition-records))
+- `sizing.file:` — path to a `ComponentSizing` file of node-count memory tiers ([component-sizing.md](component-sizing.md))
 - `manifestFiles:` — manifest YAMLs (paths relative to the recipes data
   root) bundled with the component whenever a recipe references it and the
   componentRef declares none; shipped in the injected `-post` local chart
@@ -164,6 +165,7 @@ One-liner per field:
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
 | `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
+| `sizing.file` | Path to a `ComponentSizing` file of node-count memory tiers (relative to data dir); empty means the component is never sized ([component-sizing.md](component-sizing.md)) |
 | `ownsCRDs` | Audited assertion that the component solely owns every CRD its chart ships and none uses webhook conversion, so deployers may replace its CRDs on upgrade instead of leaving them at their first-install schema. Audited chart versions are pinned in `pkg/recipe/ownscrds_audit_test.go`. Per-deployer behavior is in the [component catalog](../user/component-catalog.md#upgrading-components-that-own-crds) |
 | `ownsCRDsExcludeSubcharts` | Bare subchart names whose CRDs an `ownsCRDs` component does not own. The bundle's `apply-crds.sh` otherwise collects every `crds/` directory in the chart, disabled subcharts included, and would re-apply a CRD another component owns at this chart's schema. `nvsentinel` lists `mongodb-store`, whose Percona CRDs belong to `psmdb-operator`; `nktp` lists `prometheus-crds`, whose CRDs belong to `prometheus-operator-crds`, and `opentelemetry-operator`, whose `conf/crds/` holds Helm templates the collection would otherwise pick up. `TestCRDExclusionsMatchChart` checks each entry against the pinned chart. Valid only with `ownsCRDs` |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |

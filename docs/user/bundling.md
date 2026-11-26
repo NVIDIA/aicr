@@ -621,7 +621,9 @@ far less reserved than they use:
 The Network Operator limit is sized for large clusters only in the generic
 GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
 elsewhere), so raise `limits.memory` together with the request there: a
-request above its limit is rejected.
+request above its limit is rejected. The same holds for the GPU Operator when
+you state a GPU node count: every tier up to 2000 GPU nodes lowers its limit
+below 4Gi, so a raised request needs `limits.memory` with it.
 
 The NIC configuration daemon, a per-node DaemonSet whose pods each cache every
 `NicDevice` in the cluster, is not sized by AICR. The generic GB300 and NVKE
@@ -662,6 +664,7 @@ At bundle time, scope each resources path in the table with its override key:
 ```bash
 aicr bundle --recipe recipe.yaml \
   --set gpuoperator:operator.resources.requests.memory=4Gi \
+  --set gpuoperator:operator.resources.limits.memory=8Gi \
   --set networkoperator:operator.resources.requests.memory=8Gi \
   --set networkoperator:maintenance-operator-chart.operator.resources.requests.memory=8Gi \
   --set nodewright:controllerManager.manager.resources.requests.memory=8Gi \

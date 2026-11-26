@@ -290,6 +290,23 @@ alias the constant rather than the string it happens to equal — the tracks hol
 distinct values now, so a collapsed alias shows up as a wrong value rather than
 a latent one.
 
+### Negative `BundleOptions.Nodes` in the Go SDK
+
+**Surface:** Go SDK (`pkg/client/v1`) ·
+**Deprecated in:** none (closes a fail-open path) ·
+**Removed in:** v1.4.0
+
+`Client.MakeBundle` clamped a negative `BundleOptions.Nodes` to 0 and built the
+bundle, while the CLI already rejected a negative `--nodes` and the REST
+`nodes` parameter is declared with a minimum of 0. The count now also selects controller memory tiers,
+so the SDK rejects it the same way, with `INVALID_REQUEST`. A `BundleOptions`
+that sets `Config` is unaffected: `Config` supersedes the flat fields. Under
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy)
+this aligns a permissive path with the stricter ones, so it has no notice
+window.
+
+**What to do.** Pass 0 for "no count" instead of a negative value.
+
 ### Empty `apiVersion` on artifacts
 
 **Surface:** bundle and artifact schemas ·

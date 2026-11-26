@@ -90,6 +90,24 @@ components:
 	return layered
 }
 
+// typedPaths turns path-to-value pairs into --set-json entries for the fixture.
+func typedPaths(m map[string]any) []config.TypedComponentPath {
+	out := make([]config.TypedComponentPath, 0, len(m))
+	for p, v := range m {
+		out = append(out, config.TypedComponentPath{Component: sizingFixtureComponent, Path: p, Value: v})
+	}
+	return out
+}
+
+// lockPaths selects a profile that owns paths of the fixture component.
+func lockPaths(rr *recipe.RecipeResult, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	rr.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: "fixture", Value: "locked",
+		OwnedPaths: map[string][]string{sizingFixtureComponent: paths}}
+}
+
 func sizingFixtureDocument(t *testing.T) *sizing.File {
 	t.Helper()
 	dp := providertest.NewMap(map[string][]byte{sizingFixtureFile: []byte(sizingFixtureDoc)})
@@ -203,6 +221,8 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 		name    string
 		nodes   int
 		set     map[string]string
+		typed   map[string]any
+		lock    []string
 		wantReq string
 		wantLim string
 		wantErr bool
@@ -212,12 +232,16 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 		{name: "count lowers to the tier", nodes: 200, wantReq: "256Mi", wantLim: "768Mi"},
 		{name: "--set beats the tier", nodes: 200, set: map[string]string{"operator.resources.limits.memory": "2Gi"}, wantReq: "256Mi", wantLim: "2Gi"},
 		{name: "--set request above the sized limit fails", nodes: 200, set: map[string]string{"operator.resources.requests.memory": "1Gi"}, wantErr: true},
+		{name: "--set-json object without memory keeps sizing", nodes: 200, typed: map[string]any{"operator.resources": map[string]any{"requests": map[string]any{"cpu": "300m"}}}, wantReq: "256Mi", wantLim: "768Mi"},
+		{name: "--set-json object writing the limit beats the tier", nodes: 200, typed: map[string]any{"operator.resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}, wantReq: "256Mi", wantLim: "2Gi"},
+		{name: "lock-set path is not sized", nodes: 200, lock: []string{"operator.resources.limits.memory"}, wantReq: "256Mi", wantLim: "8Gi"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.NewConfig(
 				config.WithEstimatedNodeCount(tt.nodes),
 				config.WithValueOverrides(map[string]map[string]string{sizingFixtureComponent: tt.set}),
+				config.WithValueOverridesTypedPaths(typedPaths(tt.typed)),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {
@@ -226,6 +250,7 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 			rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
 				{Name: sizingFixtureComponent, Type: "helm", ValuesFile: sizingFixtureValues},
 			}}
+			lockPaths(rr, tt.lock)
 			rr.BindDataProvider(provider)
 			values, err := b.extractComponentValues(context.Background(), rr)
 			if tt.wantErr {
@@ -244,7 +269,7 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 			if gotReq != tt.wantReq || gotLim != tt.wantLim {
 				t.Errorf("got %v/%v, want %s/%s", gotReq, gotLim, tt.wantReq, tt.wantLim)
 			}
-			if cpu, _ := component.GetValueByPath(v, "operator.resources.requests.cpu"); cpu != "100m" {
+			if cpu, _ := component.GetValueByPath(v, "operator.resources.requests.cpu"); tt.typed == nil && cpu != "100m" {
 				t.Errorf("cpu request = %v, want it untouched", cpu)
 			}
 		})
@@ -295,6 +320,8 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 		nodes    int
 		set      map[string]string
 		dynamic  []string
+		typed    map[string]any
+		lock     []string
 		inline   map[string]any
 		wantRows []argocdhelm.SizingRow
 		wantLim  string
@@ -350,6 +377,38 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 				{MaxNodes: 450, Values: resourcesValues("256Mi", nil)},
 			},
 		},
+		{
+			name: "--set-json object without memory keeps sizing", wantLim: "8Gi",
+			typed: map[string]any{"operator.resources": map[string]any{"requests": map[string]any{"cpu": "300m"}}},
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues("256Mi", "768Mi")},
+				{MaxNodes: 450, Values: resourcesValues("256Mi", "1Gi")},
+			},
+		},
+		{
+			name: "--set-json object writing the limit leaves it out of every row", wantLim: "4Gi",
+			typed: map[string]any{"operator.resources": map[string]any{"limits": map[string]any{"memory": "4Gi"}}},
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues("256Mi", nil)},
+				{MaxNodes: 450, Values: resourcesValues("256Mi", nil)},
+			},
+		},
+		{
+			name: "lock-set path left out of every row", wantLim: "8Gi",
+			lock: []string{"operator.resources.limits.memory"},
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues("256Mi", nil)},
+				{MaxNodes: 450, Values: resourcesValues("256Mi", nil)},
+			},
+		},
+		{
+			name: "count above the top bound selects no row and keeps every row", nodes: 5000, wantLim: "8Gi",
+			set: map[string]string{"operator.resources.requests.memory": "900Mi"},
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: map[string]any{}},
+				{MaxNodes: 450, Values: resourcesValues(nil, "1Gi")},
+			},
+		},
 		{name: "vendored charts size at generation time", vendor: true, nodes: 200, wantLim: "768Mi"},
 		{name: "local chart sizes at generation time", local: true, nodes: 200, wantLim: "768Mi"},
 	}
@@ -361,6 +420,7 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 				config.WithEstimatedNodeCount(tt.nodes),
 				config.WithValueOverrides(map[string]map[string]string{sizingFixtureComponent: tt.set}),
 				config.WithDynamicValues(map[string][]string{sizingFixtureComponent: tt.dynamic}),
+				config.WithValueOverridesTypedPaths(typedPaths(tt.typed)),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {
@@ -372,6 +432,7 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 				ref.Source = ""
 			}
 			rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{ref}}
+			lockPaths(rr, tt.lock)
 			rr.BindDataProvider(provider)
 			values, err := b.extractComponentValues(context.Background(), rr)
 			if tt.wantCode != "" {
@@ -419,5 +480,72 @@ func TestQuantityOf(t *testing.T) {
 				t.Errorf("quantityOf(%v) = %s, want %s", tt.in, got.String(), tt.want)
 			}
 		})
+	}
+}
+
+// TestBuildDeployerHandsSizingToArgoCDHelm fails when the argocd-helm
+// generator does not receive the rows and the default sizing.nodeCount.
+func TestBuildDeployerHandsSizingToArgoCDHelm(t *testing.T) {
+	provider := sizingFixtureProvider(t)
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerArgoCDHelm),
+		config.WithEstimatedNodeCount(400),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: sizingFixtureComponent, Type: "helm",
+		ValuesFile: sizingFixtureValues, Source: "https://charts.example.com"}}}
+	rr.BindDataProvider(provider)
+	values, err := b.extractComponentValues(context.Background(), rr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := b.buildDeployer(context.Background(), rr, values, nil, "")
+	if err != nil {
+		t.Fatalf("buildDeployer: %v", err)
+	}
+	g, ok := d.(*argocdhelm.Generator)
+	if !ok {
+		t.Fatalf("want *argocdhelm.Generator, got %T", d)
+	}
+	if g.SizingNodeCount != 400 {
+		t.Errorf("SizingNodeCount = %d, want 400", g.SizingNodeCount)
+	}
+	want := []argocdhelm.SizingRow{
+		{MaxNodes: 250, Values: resourcesValues("256Mi", "768Mi")},
+		{MaxNodes: 450, Values: resourcesValues("256Mi", "1Gi")},
+	}
+	if got := g.SizingRows[sizingFixtureComponent]; !reflect.DeepEqual(got, want) {
+		t.Errorf("SizingRows = %+v, want %+v", got, want)
+	}
+}
+
+// TestBuildRowsSharesBoundsAcrossResources fails when two resources with the
+// same bounds produce a row per resource instead of one per bound.
+func TestBuildRowsSharesBoundsAcrossResources(t *testing.T) {
+	tier := func(maxNodes int, lim string) sizing.Tier {
+		return sizing.Tier{MaxNodes: maxNodes, Limits: &sizing.Memory{Memory: lim}}
+	}
+	sz := &sizing.File{Resources: []sizing.Resource{
+		{Path: "a.resources", Tiers: []sizing.Tier{tier(250, "1Gi"), tier(450, "2Gi")}},
+		{Path: "b.resources", Tiers: []sizing.Tier{tier(250, "512Mi"), tier(450, "1Gi")}},
+	}}
+	values := map[string]any{
+		"a": map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "4Gi"}}},
+		"b": map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "4Gi"}}},
+	}
+	rows, err := buildRows(&recipe.ComponentRef{Name: "x"}, values, nil, sz, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].MaxNodes != 250 || rows[1].MaxNodes != 450 {
+		t.Fatalf("rows = %+v, want one row per bound 250 and 450", rows)
+	}
+	for _, path := range []string{"a.resources.limits.memory", "b.resources.limits.memory"} {
+		if _, ok := component.GetValueByPath(rows[0].Values, path); !ok {
+			t.Errorf("row 250 is missing %s", path)
+		}
 	}
 }

@@ -87,6 +87,8 @@ func TestParse(t *testing.T) {
 		{name: "second document", old: "kind: ComponentSizing", new: "kind: ComponentSizing\n---\nkind: x", wantErr: "more than one YAML document"},
 		{name: "wrong kind", old: "kind: ComponentSizing", new: "kind: ComponentUpgrades", wantErr: "has kind"},
 		{name: "wrong apiVersion", old: "aicr.run/v1beta1", new: "aicr.run/v1alpha1", wantErr: "has apiVersion"},
+		{name: "newer apiVersion with an unknown field names the header", old: "aicr.run/v1beta1\nkind: ComponentSizing", new: "aicr.run/v1beta2\nkind: ComponentSizing\nbogus: 1", wantErr: "has apiVersion"},
+		{name: "wrong kind with an unknown field names the header", old: "kind: ComponentSizing", new: "kind: ComponentUpgrades\nbogus: 1", wantErr: "has kind"},
 		{name: "wrong basis", old: "basis: gpuNodes", new: "basis: nodes", wantErr: "has basis"},
 		{name: "malformed path", old: "path: operator.resources", new: "path: operator..resources", wantErr: "not a well-formed"},
 		{name: "non-positive maxNodes", old: "maxNodes: 100", new: "maxNodes: 0", wantErr: "must be positive"},
@@ -328,9 +330,10 @@ func valueAt(m map[string]any, dotted string) (any, bool) {
 	return cur, true
 }
 
-// TestRegistrySizingKeepsRequestsWithinLimits fails when a values file's
-// memory request would end above a tier's limit: every bundle of that file at
-// a count in the tier would fail the request-within-limit check.
+// TestRegistrySizingKeepsRequestsWithinLimits fails when a values file,
+// merged over values.yaml as an overlay is, would end with its memory request
+// above a tier's limit: every bundle of that file at a count in the tier would
+// fail the request-within-limit check.
 func TestRegistrySizingKeepsRequestsWithinLimits(t *testing.T) {
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
@@ -358,13 +361,11 @@ func TestRegistrySizingKeepsRequestsWithinLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, f := range files {
-			data, readErr := fs.ReadFile(fsys, f)
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			var values map[string]any
-			if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
-				t.Fatalf("%s: %v", f, yamlErr)
+			// An overlay values file merges over values.yaml, as in a bundle.
+			values, valErr := recipe.GetComponentValuesWithContext(context.Background(), nil,
+				&recipe.ComponentRef{Name: c.Name, ValuesFile: f})
+			if valErr != nil {
+				t.Fatalf("%s: %v", f, valErr)
 			}
 			for _, r := range sz.Resources {
 				req, hasReq := quantity(values, r.Path+"."+Requests+".memory")

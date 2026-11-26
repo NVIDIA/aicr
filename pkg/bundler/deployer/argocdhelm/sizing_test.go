@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -364,5 +365,91 @@ func TestGenerateRemovesStaleSizingRows(t *testing.T) {
 		if f == stale {
 			t.Errorf("output lists %s", stale)
 		}
+	}
+}
+
+// TestGenerateKeepsStaticValuesOfSizingSuffixedComponent fails when the
+// stale-rows cleanup for an unsized component deletes the static values of a
+// component whose name is that component's plus the sizing suffix.
+func TestGenerateKeepsStaticValuesOfSizingSuffixedComponent(t *testing.T) {
+	ref := func(name string) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: name, Namespace: name, Chart: name, Version: "v1.0.0",
+			Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com"}
+	}
+	entry := func(name, key string) string {
+		return `  - name: ` + name + `
+    displayName: ` + name + `
+    class: ops
+    valueOverrideKeys: [` + key + `]
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/` + name + `
+      defaultVersion: v1.0.0
+`
+	}
+	registryYAML := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents:\n" +
+		entry("foo"+sizingFileSuffix, "foosizing") + entry("foo", "foo")
+	dataDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
+	layered, err := recipe.NewLayeredDataProvider(recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
+		recipe.LayeredProviderConfig{ExternalDir: dataDir})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{ref("foo" + sizingFileSuffix), ref("foo")})
+	rr.DeploymentOrder = []string{"foo" + sizingFileSuffix, "foo"}
+	rr.BindDataProvider(layered)
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"foo" + sizingFileSuffix: {"replicaCount": 2},
+			"foo":                    {"replicaCount": 1},
+		},
+		Version: "v0.0.0-test",
+	}
+	outputDir := t.TempDir()
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	kept := filepath.Join(outputDir, "static", "foo"+sizingFileSuffix+".yaml")
+	data, err := os.ReadFile(kept)
+	if err != nil {
+		t.Fatalf("static values of foo%s removed: %v", sizingFileSuffix, err)
+	}
+	if !strings.Contains(string(data), "replicaCount: 2") {
+		t.Errorf("%s does not hold foo%s's values:\n%s", kept, sizingFileSuffix, data)
+	}
+	if !slices.Contains(out.Files, kept) {
+		t.Errorf("output does not list %s", kept)
+	}
+}
+
+// TestRootValuesDocumentSizingOnlyWhenSized fails when the root values.yaml
+// documents sizing.nodeCount for a bundle where nothing reads it.
+func TestRootValuesDocumentSizingOnlyWhenSized(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		sized bool
+	}{{"sized", true}, {"not sized", false}} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := sizingFixtureGenerator(0)
+			if !tt.sized {
+				g.SizingRows = nil
+			}
+			outputDir := t.TempDir()
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(outputDir, "values.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(data), "#   sizing.nodeCount"); got != tt.sized {
+				t.Errorf("values.yaml documents sizing.nodeCount = %v, want %v", got, tt.sized)
+			}
+			if !strings.Contains(string(data), "deployer.cascadeDelete is intentionally NOT") {
+				t.Error("values.yaml lost the header text after the sizing paragraph")
+			}
+		})
 	}
 }

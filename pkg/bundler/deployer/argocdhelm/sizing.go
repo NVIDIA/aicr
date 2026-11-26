@@ -72,6 +72,16 @@ func (g *Generator) validateSizing() error {
 	return nil
 }
 
+// componentNamed reports whether the recipe has a component called name.
+func (g *Generator) componentNamed(name string) bool {
+	for i := range g.RecipeResult.ComponentRefs {
+		if g.RecipeResult.ComponentRefs[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // sizingRowsDocument is the content of static/<name>-sizing.yaml.
 func sizingRowsDocument(rows []SizingRow) map[string]any {
 	tiers := make([]any, 0, len(rows))

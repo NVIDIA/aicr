@@ -141,6 +141,22 @@ func Load(ctx context.Context, dp recipe.DataProvider, component, path string) (
 }
 
 func parse(data []byte, path string) (*File, error) {
+	// The header is read before strict decoding so a file of another kind or
+	// version is reported by its header, not by a field this schema lacks.
+	var hdr struct {
+		APIVersion string `yaml:"apiVersion"`
+		Kind       string `yaml:"kind"`
+	}
+	if err := yaml.NewDecoder(bytes.NewReader(data)).Decode(&hdr); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to parse sizing file %q", path), err)
+	}
+	if hdr.Kind != Kind {
+		return nil, fileErr(path, "has kind %q, expected %q", hdr.Kind, Kind)
+	}
+	if hdr.APIVersion != header.GroupVersionV1Beta1 {
+		return nil, fileErr(path, "has apiVersion %q, expected %q", hdr.APIVersion, header.GroupVersionV1Beta1)
+	}
 	var s File
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -164,12 +180,6 @@ func parse(data []byte, path string) (*File, error) {
 }
 
 func (s *File) validate(path string) error {
-	if s.Kind != Kind {
-		return fileErr(path, "has kind %q, expected %q", s.Kind, Kind)
-	}
-	if s.APIVersion != header.GroupVersionV1Beta1 {
-		return fileErr(path, "has apiVersion %q, expected %q", s.APIVersion, header.GroupVersionV1Beta1)
-	}
 	if s.Basis != BasisGPUNodes {
 		return fileErr(path, "has basis %q, expected %q", s.Basis, BasisGPUNodes)
 	}

@@ -92,7 +92,9 @@ only up to its `gpuNodes` in total.
 `TestRegistrySizingPathsAreSet` fails when a sizing path sets memory in none
 of the component's `values*.yaml` files, so a key renamed by a chart bump
 cannot turn sizing into a silent no-op. No unit test asserts a real tier's
-values; they are validated against measurements, not pinned in the suite.
+values; they are validated against measurements, not pinned in the suite. The
+stock render golden does hash the values the lowest tier produces, so it
+changes with that tier.
 
 Every component's file declares the same `maxNodes` bounds, so one count
 selects the same row everywhere; `TestRegistrySizingFilesShareBounds` fails
@@ -172,7 +174,10 @@ reading is one `kubectl top pod` sample; it is a floor, not a peak.
 3. Update `measurements`: add the new readings, set `sets` on the ones that
    now decide each field, and drop readings nothing uses any more.
 4. Run `go test ./pkg/recipe/sizing/` and bundle the recipe at a count
-   inside the tier to see the new values.
+   inside the tier to see the new values. A change to the lowest tier also
+   moves the stock render golden, which bundles every leaf at `--nodes 3`:
+   regenerate it with
+   `AICR_UPDATE_GOLDEN=1 go test ./pkg/bundler/ -run TestStockRenderParityGolden`.
 
 When a chart bump changes what a controller caches, re-measure every tier of
 that component before the bump lands. A comment at the pin in
