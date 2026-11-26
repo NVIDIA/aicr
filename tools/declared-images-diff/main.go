@@ -55,9 +55,10 @@ import (
 	"aicr.run/pkg/errors"
 )
 
-// imageReferenceProperty is the CycloneDX property k8s-aibom sets on each
-// container component to the image reference from the pod spec.
-const imageReferenceProperty = "image.reference"
+// imageReferenceProperties are the names of the CycloneDX property k8s-aibom
+// sets on each container component to the image reference from the pod spec.
+// k8s-aibom v1.7.0 renamed image.reference to k8s-aibom:image:reference.
+var imageReferenceProperties = []string{"k8s-aibom:image:reference", "image.reference"}
 
 func main() {
 	var (
@@ -314,12 +315,12 @@ func bomImages(data []byte) ([]string, error) {
 	return images, nil
 }
 
-// containerRef returns the image.reference property of c, or else its name
+// containerRef returns the image reference property of c, or else its name
 // and version joined as name:version.
 func containerRef(c cdx.Component) string {
 	if c.Properties != nil {
 		for _, p := range *c.Properties {
-			if p.Name == imageReferenceProperty && p.Value != "" {
+			if slices.Contains(imageReferenceProperties, p.Name) && p.Value != "" {
 				return p.Value
 			}
 		}

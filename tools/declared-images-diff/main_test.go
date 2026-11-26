@@ -122,6 +122,15 @@ func TestRun(t *testing.T) {
 			want: []string{},
 		},
 		{
+			name:   "k8s-aibom v1.7.0 reference property",
+			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+  "components": [{"type": "container", "bom-ref": "a", "name": "agent",
+    "properties": [{"name": "k8s-aibom:image:reference", "value": "example.com/op/agent:1.0.0"}]},
+  {"type": "container", "bom-ref": "b", "name": "sidecar",
+    "properties": [{"name": "k8s-aibom:image:reference", "value": "example.com/op/sidecar:1.0"}]}]}`},
+			want: []string{"example.com/op/sidecar:1.0"},
+		},
+		{
 			name:   "metadata.component subject and its nested containers",
 			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
   "metadata": {"component": {"type": "container", "bom-ref": "s", "name": "nats", "version": "2.10.21-alpine",
