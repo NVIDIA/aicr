@@ -20,9 +20,10 @@ import (
 	"strings"
 	"testing"
 
+	"aicr.run/pkg/bom"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
-	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/helm"
 )
 
 const declaredFixture = `component: %s
@@ -164,16 +165,55 @@ func TestReadDeclaredImages(t *testing.T) {
 			if err != nil {
 				t.Fatalf("readDeclaredImages() error = %v", err)
 			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("readDeclaredImages() = %v, want %v", got, tt.want)
+			var refs []string
+			for _, d := range got {
+				refs = append(refs, d.Image)
+			}
+			if !slices.Equal(refs, tt.want) {
+				t.Errorf("readDeclaredImages() = %v, want %v", refs, tt.want)
 			}
 		})
 	}
 }
 
-func TestSurveyComponentMergesDeclaredImages(t *testing.T) {
-	root := declaredTree(t, "op", strings.ReplaceAll(declaredFixture, "%s", "op"))
-	mock := &helmtest.MockRenderer{Rendered: map[string][]byte{"op": []byte(`
+// gatedRenderer renders base, followed by gated[path] for each path the
+// render's inline values set to true.
+type gatedRenderer struct {
+	base   string
+	gated  map[string]string
+	errs   map[string]error
+	inputs []helm.ChartInput
+}
+
+func (g *gatedRenderer) Render(_ context.Context, in helm.ChartInput) ([]byte, error) {
+	g.inputs = append(g.inputs, in)
+	out := g.base
+	for p, extra := range g.gated {
+		if valueAt(in.Values, p) != true {
+			continue
+		}
+		if err := g.errs[p]; err != nil {
+			return nil, err
+		}
+		out += extra
+	}
+	return []byte(out), nil
+}
+
+// valueAt returns the value at the dot-separated path in values, or nil.
+func valueAt(values map[string]any, p string) any {
+	var cur any = values
+	for _, k := range strings.Split(p, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = m[k]
+	}
+	return cur
+}
+
+const opDeployment = `
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -186,16 +226,84 @@ spec:
         image: example.com/op/operator:1.0.0
       - name: dup
         image: example.com/op/initc:1.0.0
-`)}}
+`
+
+func TestSurveyComponentMergesDeclaredImages(t *testing.T) {
+	root := declaredTree(t, "op", strings.ReplaceAll(declaredFixture, "%s", "op"))
+	r := &gatedRenderer{base: opDeployment, gated: map[string]string{
+		"extra.enabled": "        env: [{name: EXTRA_IMAGE, value: example.com/op/extra:1.0.0}]\n",
+	}}
 	c := component{Name: "op", Helm: helmCfg{DefaultRepository: "https://charts.example.com",
 		DefaultChart: "example/op", DefaultVersion: "1.0.0"}}
 
-	res, err := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
+	res, err := surveyComponent(context.Background(), root, c, r, false, catalogDriverTargets{})
 	if err != nil {
 		t.Fatalf("surveyComponent() error = %v", err)
 	}
 	want := []string{"example.com/op/extra:1.0.0", "example.com/op/initc:1.0.0", "example.com/op/operator:1.0.0"}
 	if !slices.Equal(res.Images, want) {
 		t.Errorf("images = %v, want %v (declared merged, sorted, deduplicated)", res.Images, want)
+	}
+	if len(r.inputs) != 2 || valueAt(r.inputs[1].Values, "extra.enabled") != true {
+		t.Errorf("renders = %+v, want the default render and one with extra.enabled=true", r.inputs)
+	}
+}
+
+func TestVerifyEnabledBy(t *testing.T) {
+	c := component{Name: "op", Helm: helmCfg{DefaultRepository: "https://charts.example.com",
+		DefaultChart: "example/op", DefaultVersion: "1.0.0"}}
+	declared := []bom.DeclaredImage{
+		{Image: "example.com/op/initc:1.0.0"},
+		{Image: "example.com/op/a:1.0.0", EnabledBy: "a.enabled"},
+		{Image: "example.com/op/b:1.0.0", EnabledBy: "b.enabled"},
+	}
+	const (
+		a = "\n# example.com/op/a:1.0.0"
+		b = "\n# example.com/op/b:1.0.0"
+	)
+
+	tests := []struct {
+		name         string
+		base         string
+		gated        map[string]string
+		errs         map[string]error
+		wantWarnings int
+		wantMsg      string // empty when no error is expected
+	}{
+		{name: "each gate renders its images", gated: map[string]string{"a.enabled": a, "b.enabled": b}},
+		{
+			name: "gated image missing from its render", gated: map[string]string{"a.enabled": a, "b.enabled": a},
+			wantMsg: "example.com/op/b:1.0.0 does not render with b.enabled=true",
+		},
+		{
+			name: "gated image in the default render", base: a, gated: map[string]string{"a.enabled": a, "b.enabled": b},
+			wantMsg: "example.com/op/a:1.0.0 renders without a.enabled=true",
+		},
+		{
+			name: "failed gated render is a warning", gated: map[string]string{"a.enabled": a, "b.enabled": b},
+			errs: map[string]error{"b.enabled": errors.New(errors.ErrCodeUnavailable, "chart fetch failed")}, wantWarnings: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &gatedRenderer{base: opDeployment + tt.base, gated: tt.gated, errs: tt.errs}
+			warnings, err := verifyEnabledBy(context.Background(), t.TempDir(), c, r, declared, []byte(r.base))
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("warnings = %q, want %d", warnings, tt.wantWarnings)
+			}
+			if tt.wantMsg == "" {
+				if err != nil {
+					t.Fatalf("verifyEnabledBy() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("verifyEnabledBy() error = nil, want one containing %q", tt.wantMsg)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %q, want it to contain %q", err, tt.wantMsg)
+			}
+		})
 	}
 }

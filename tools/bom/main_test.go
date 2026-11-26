@@ -489,7 +489,7 @@ func TestRenderHelmComponent(t *testing.T) {
 		},
 	}
 
-	out, warnings := renderHelmComponent(context.Background(), root, c, mock)
+	out, warnings := renderHelmComponent(context.Background(), root, c, mock, nil)
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -514,7 +514,7 @@ func TestRenderHelmComponentError(t *testing.T) {
 		},
 	}
 
-	out, warnings := renderHelmComponent(context.Background(), root, c, mock)
+	out, warnings := renderHelmComponent(context.Background(), root, c, mock, nil)
 	if len(out) != 0 {
 		t.Errorf("expected empty output on error, got %d bytes", len(out))
 	}
@@ -550,7 +550,7 @@ func TestRenderHelmComponentWithValuesFile(t *testing.T) {
 		},
 	}
 
-	out, warnings := renderHelmComponent(context.Background(), root, c, mock)
+	out, warnings := renderHelmComponent(context.Background(), root, c, mock, nil)
 	if len(warnings) != 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
@@ -601,7 +601,7 @@ func TestRenderHelmComponentValuesStatError(t *testing.T) {
 		},
 	}
 
-	_, warnings := renderHelmComponent(context.Background(), root, c, mock)
+	_, warnings := renderHelmComponent(context.Background(), root, c, mock, nil)
 	if len(warnings) == 0 {
 		t.Fatal("expected warning from values.yaml stat permission error, got none")
 	}

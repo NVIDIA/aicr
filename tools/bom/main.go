@@ -324,8 +324,11 @@ func surveyComponents(
 	return results, nil
 }
 
-// renderHelmComponent shells out to `helm template` for c.
-func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
+// renderHelmComponent shells out to `helm template` for c, with values
+// merged over c's values.yaml.
+func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer,
+	values map[string]any) ([]byte, []string) {
+
 	var warnings []string
 
 	valuesPath := filepath.Join(repoRoot, "recipes", "components", c.Name, "values.yaml")
@@ -344,6 +347,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 		Version:    c.Helm.DefaultVersion,
 		Namespace:  c.Helm.DefaultNamespace,
 		ValuesPath: valuesPath,
+		Values:     values,
 	})
 	if err != nil {
 		warnings = append(warnings, err.Error())
@@ -383,9 +387,15 @@ func surveyComponent(
 
 	images := map[string]struct{}{}
 
+	// defaultRender is the chart rendered with values.yaml alone, kept only
+	// when that render succeeded.
+	var defaultRender []byte
 	if c.kind() == kindHelm && !skipHelm {
-		out, warnings := renderHelmComponent(ctx, repoRoot, c, r)
+		out, warnings := renderHelmComponent(ctx, repoRoot, c, r, nil)
 		res.Warnings = append(res.Warnings, warnings...)
+		if len(warnings) == 0 {
+			defaultRender = out
+		}
 		if len(out) > 0 {
 			set, parseErr := bom.ExtractImageSetFromYAML(out)
 			if parseErr != nil {
@@ -477,10 +487,17 @@ func surveyComponent(
 	if err != nil {
 		return res, err
 	}
-	for _, i := range declared {
-		if _, seen := images[i]; !seen {
-			images[i] = struct{}{}
-			res.Images = append(res.Images, i)
+	if len(defaultRender) > 0 {
+		warnings, gateErr := verifyEnabledBy(ctx, repoRoot, c, r, declared, defaultRender)
+		res.Warnings = append(res.Warnings, warnings...)
+		if gateErr != nil {
+			return res, gateErr
+		}
+	}
+	for _, d := range declared {
+		if _, seen := images[d.Image]; !seen {
+			images[d.Image] = struct{}{}
+			res.Images = append(res.Images, d.Image)
 		}
 	}
 	sort.Strings(res.Images)

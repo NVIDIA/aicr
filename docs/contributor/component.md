@@ -582,7 +582,9 @@ charts:
   that version, and check that it pulls.
 - `enabledBy`, allowed only on `charts` entries, names a values path.
   `aicr mirror list` includes the image only when that path is `true`.
-  The BOM always includes it.
+  The BOM always includes it. `make bom-docs` renders the chart with the
+  path set to `true` and fails unless the image appears in that render
+  and not in the render with the base `values.yaml`.
 
 **Lookup.** An entry matches by chart name and version, and the deployed
 repository's entry wins. When that repository has no entry for the chart

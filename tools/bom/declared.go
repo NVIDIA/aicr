@@ -15,14 +15,22 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	stderrors "errors"
+	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"aicr.run/pkg/bom"
+	pkgcomponent "aicr.run/pkg/component"
 	"aicr.run/pkg/errors"
+	"aicr.run/pkg/helm"
 )
 
 // declaredRequiredComponents names the components whose operators launch
@@ -49,7 +57,7 @@ var declaredRequiredComponents = map[string]struct{}{
 // chart from another repository by name and version. Every declared image is
 // listed whatever its enabledBy path, since the BOM lists what a component can
 // deploy. A file with no entry for the surveyed version fails the survey.
-func readDeclaredImages(repoRoot string, c component, version string, rendered []string) ([]string, error) {
+func readDeclaredImages(repoRoot string, c component, version string, rendered []string) ([]bom.DeclaredImage, error) {
 	d, found, err := loadDeclaredImages(repoRoot, c.Name)
 	if err != nil || !found {
 		return nil, err
@@ -71,12 +79,50 @@ func readDeclaredImages(repoRoot string, c component, version string, rendered [
 			images = append(images, m.Images...)
 		}
 	}
+	return images, nil
+}
 
-	out := make([]string, 0, len(images))
-	for _, i := range images {
-		out = append(out, i.Image)
+// verifyEnabledBy renders c once for each enabledBy path in declared, with
+// that path set to true. Each image gated on the path must appear in that
+// render and not in defaultRender, the render with c's values.yaml alone, so
+// the path is the value the chart gates the image on. A failed render is a
+// warning, which fails a strict run.
+func verifyEnabledBy(ctx context.Context, repoRoot string, c component, r helm.Renderer,
+	declared []bom.DeclaredImage, defaultRender []byte) ([]string, error) {
+
+	gated := map[string][]string{}
+	for _, d := range declared {
+		if d.EnabledBy != "" {
+			gated[d.EnabledBy] = append(gated[d.EnabledBy], d.Image)
+		}
 	}
-	return out, nil
+	var warnings, problems []string
+	for _, p := range slices.Sorted(maps.Keys(gated)) {
+		values := map[string]any{}
+		pkgcomponent.SetValueByPath(values, p, true)
+		out, renderWarnings := renderHelmComponent(ctx, repoRoot, c, r, values)
+		if len(renderWarnings) > 0 {
+			for _, w := range renderWarnings {
+				warnings = append(warnings, fmt.Sprintf("render with %s=true: %s", p, w))
+			}
+			continue
+		}
+		for _, img := range gated[p] {
+			switch {
+			case !bytes.Contains(out, []byte(img)):
+				problems = append(problems, fmt.Sprintf("%s does not render with %s=true", img, p))
+			case bytes.Contains(defaultRender, []byte(img)):
+				problems = append(problems, fmt.Sprintf("%s renders without %s=true", img, p))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return warnings, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s enabledBy does not match chart version %s: %s",
+				c.Name, bom.DeclaredImagesFile, c.Helm.DefaultVersion, strings.Join(problems, "; ")),
+			map[string]any{componentContextKey: c.Name})
+	}
+	return warnings, nil
 }
 
 // loadDeclaredImages reads and parses the named component's images.yaml.

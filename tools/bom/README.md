@@ -80,6 +80,11 @@ supply-chain dashboards without conversion.
   operator image fails the run in every mode, as does a missing file for a
   component in `declaredRequiredComponents`. See
   [Declared Images](../../docs/contributor/component.md#declared-images).
+- For each `enabledBy` path in a surveyed chart's `images.yaml` entry, the
+  chart is rendered again with that path set to `true`. A gated image that
+  does not appear in that render, or appears in the default render, fails
+  the run in every mode. A failed gated render is a warning, so it fails
+  only under `-strict`. `-skip-helm` skips the check.
 - A Helm chart that legitimately renders no images (CRD-only charts) must be
   listed in `expectedNoImages` in `main.go`, with a reason. Under `-strict`,
   an unlisted chart with zero images fails, and a listed chart that starts
