@@ -175,12 +175,17 @@ func TestRun(t *testing.T) {
 		{
 			name:   "empty AIBOM list fails closed",
 			mirror: mirrorYAML, aiboms: []string{`{"apiVersion": "v1", "kind": "List", "items": []}`},
-			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "hold no running container image",
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "holds no running container image",
 		},
 		{
 			name:   "BOM without containers fails closed",
 			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1}`},
-			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "hold no running container image",
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "holds no running container image",
+		},
+		{
+			name:   "one empty input among several fails closed",
+			mirror: mirrorYAML, aiboms: []string{workloadBOM, `{"apiVersion": "v1", "kind": "List", "items": []}`},
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "holds no running container image",
 		},
 		{
 			name:   "AIBOM without an inline BOM fails closed",

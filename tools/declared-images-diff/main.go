@@ -30,7 +30,7 @@
 //
 // It runs offline on exported files. It exits 1 when a running image is not
 // covered, and 2 when an input cannot be read, a BOM is not held inline, or
-// the inputs hold no running container image.
+// an -aibom input holds no running container image.
 //
 // Usage:
 //
@@ -123,7 +123,6 @@ func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result
 		return result{}, err
 	}
 
-	seen := 0
 	uncovered, tagOnly := sets.New[string](), sets.New[string]()
 	for _, p := range aibomPaths {
 		data, err := readBounded(p)
@@ -134,7 +133,10 @@ func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result
 		if err != nil {
 			return result{}, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read "+p)
 		}
-		seen += len(running)
+		if len(running) == 0 {
+			return result{}, errors.New(errors.ErrCodeInvalidRequest,
+				p+" holds no running container image, so there is nothing to compare")
+		}
 		for _, ref := range running {
 			m, err := covered.covers(ref)
 			if err != nil {
@@ -148,10 +150,6 @@ func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result
 				tagOnly.Insert(ref)
 			}
 		}
-	}
-	if seen == 0 {
-		return result{}, errors.New(errors.ErrCodeInvalidRequest,
-			"the -aibom inputs hold no running container image, so there is nothing to compare")
 	}
 	return result{
 		uncovered: sets.List(uncovered),
