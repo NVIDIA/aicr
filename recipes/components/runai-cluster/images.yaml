@@ -1,0 +1,94 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Images this component deploys that no rendered template shows. See
+# "Declared Images" in docs/contributor/component.md.
+component: runai-cluster
+charts:
+  - repository: https://helm.ngc.nvidia.com/nvidia/runai-oss
+    chart: runai-cluster
+    sourceVersion: 3.0.26
+    images:
+      - image: nvcr.io/nvidia/runai-oss/accessrule-controller:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/admission-controller:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/advice-restart-controller:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/agent:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/anyworkload-controller:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/application-controller:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/cluster-api:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/cluster-sync:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/external-workload-integrator:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/goofys:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/init-ca-base:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/metrics-exporter:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/runtime-rules:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/shared-objects-controller:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/status-updater:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: nvcr.io/nvidia/runai-oss/workload-exporter:3.0.26
+        source: Operand of runai-operator, at IMG_DEFAULT_REGISTRY and IMG_DEFAULT_VERSION.
+      - image: registry.k8s.io/git-sync/git-sync:v4.7.0
+        source: Operand of runai-operator, from the IMG_THIRD_PARTY_GIT_SYNC_* env (thirdPartyImages).
+      - image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
+        source: Operand of runai-operator, from the IMG_THIRD_PARTY_OAUTH2_PROXY_* env (thirdPartyImages).
+      - image: docker.io/valkey/valkey:9.0.4
+        source: Operand of runai-operator, from the IMG_THIRD_PARTY_VALKEY_* env (thirdPartyImages).
+      - image: registry.access.redhat.com/ubi9/ubi-minimal:9.8
+        source: Operand of runai-operator, from the IMG_THIRD_PARTY_WAIT_UBI_MINIMAL_* env (thirdPartyImages).
+      - image: ghcr.io/kai-scheduler/kai-scheduler/admission:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/binder:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.18.8
+        source: Operand of the bundled kai-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-resource-management/nodepool-controller:v0.18.8
+        source: Operand of the bundled krm-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-resource-management/pod-group-assigner:v0.18.8
+        source: Operand of the bundled krm-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/kai-resource-management/project-controller:v0.18.8
+        source: Operand of the bundled krm-operator, at MS_REPOSITORY and MS_TAG.
+      - image: ghcr.io/kai-scheduler/gpu-fractioning/fractiond:v0.1.9
+        source: Operand of the bundled gpu-fractioning operator, from the FRACTIOND_IMAGE_* env.
+      - image: ghcr.io/kai-scheduler/gpu-fractioning/metricsd:v0.1.9
+        source: Operand of the bundled gpu-fractioning operator, from the METRICSD_IMAGE_* env.
+      - image: ghcr.io/kai-scheduler/gpu-fractioning/mpsd:v0.1.9
+        source: Operand of the bundled gpu-fractioning operator, from the MPSD_IMAGE_* env.

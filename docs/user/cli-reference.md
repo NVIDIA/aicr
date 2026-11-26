@@ -3812,6 +3812,13 @@ operator pulls on a node; a driver whose tag the recipe does not determine is
 named in the component's `warnings` instead (see
 [Air-Gapped Mirroring](air-gap-mirror.md#overriding-component-values)).
 
+The list also includes images that operators launch at run time, declared in
+`recipes/components/<name>/images.yaml` for the chart version or operator image
+each component deploys. An image with `enabledBy` is listed only when that value
+is `true` in the recipe. A component with no matching entry, such as one a
+`--data` overlay moves to another version, gets a warning and none of its
+declared images.
+
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
 

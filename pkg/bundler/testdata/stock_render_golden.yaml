@@ -4705,7 +4705,7 @@ h100-gke-cos-inference-dynamo+knative:
   005-knative-serving/Chart.yaml: 164f8c69cf25d53b2c5320a3ab2c73294d9627eadebccb6d1aa66b439f663019
   005-knative-serving/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-knative-serving/install.sh: 7a3aea75aefe19291fafd888c25d1e95c70c81ce708e0de6c212024901957d9b
-  005-knative-serving/templates/knative-serving.yaml: 700b20ee48c4898103db01504b221bd9b03d77979fe95b3398ecb24515bc2d40
+  005-knative-serving/templates/knative-serving.yaml: 6df23a206ff0dc0394151b965dea4eac1ea37b7e31f8d8331db7d501e247493b
   005-knative-serving/values.yaml: 716ac9e3db021fa6708485a4fe601488c103becfc859302811c64eba08609187
   006-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7
@@ -4792,7 +4792,7 @@ h100-gke-cos-inference-dynamo+knative:
   README.md: 9bd9289e658569feec4e60a413d6e38b2b1699977faeb9f605643666e0a675dd
   UPGRADING.md: 499d451dc9b719c821d22913836071908b13f4f3f8f68d1e3137f5331706662f
   bundle-info.yaml: b82de72392ceb55bf54c04b0e0625671bb6d9a949df76303e7814448d2b6bf41
-  checksums.txt: 5cf711f3ef452f3abc9421f32b361ec7f635e7ec0b829e329e32fba01f78c4f9
+  checksums.txt: b2779ff1f3eabdbcc511b8424831dde66f10b0e8abfa57b730d4ec62697ff44b
   data/overlays/stock-render-opt-in.yaml: aca45cd707e9340ba67a197f6464662cc8a401d3cd566a58f254a1ea6a325453
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 88b61b485a60390b9943e39d3e3ec72b1881a46692a3f19ab717295888d11a78

@@ -27,6 +27,9 @@
 //     node OS (and architecture) the operator appends.
 //   - ParseImageRef splits a container image string into registry, repository,
 //     tag, and digest components.
+//   - ParseDeclaredImages reads a component's images.yaml, the images its
+//     operator launches that no rendered template shows, recorded against
+//     the chart version or vendored operator image they were read from.
 //   - BuildBOM assembles a CycloneDX 1.6 document from per-component image
 //     surveys, modeling AICR as the root component, each AICR component
 //     (gpu-operator, network-operator, ...) as an `application`, and each

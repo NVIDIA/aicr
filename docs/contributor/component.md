@@ -542,6 +542,7 @@ regenerated file in the **same PR** whenever you:
 - Bump a chart version (in `registry.yaml`, an overlay, or a mixin)
 - Change a `values.yaml` in a way that affects which images render
   (image-repo override, subchart enable/disable, etc.)
+- Change a component's `images.yaml`
 
 The BOM's version column and component set are gated at PR time
 (`TestCommittedBOMVersionsMatchRegistry` plus the `bom-freshness`
@@ -551,6 +552,77 @@ chart pulling a new image with no pin change on our side; `make
 bom-check` (a full re-render comparison) is its **opt-in** blocking
 check, and the weekly BOM-refresh workflow auto-detects it and opens a
 PR. Still run `make bom-docs` locally on any chart-touching change.
+
+## Declared Images
+
+Rendering a chart finds only the images its templates name. The BOM and
+`aicr mirror list` also read `recipes/components/<name>/images.yaml`,
+which lists the images rendering misses:
+
+- images an operator launches at run time
+- images a chart renders only behind a value the base `values.yaml`
+  leaves off
+
+```yaml
+component: example-operator
+charts:
+  - repository: oci://registry.example.com/charts
+    chart: example-operator
+    sourceVersion: v1.2.0
+    images:
+      - image: registry.example.com/example/init:v1.2.0
+        source: Init container the operator injects into the pods it manages.
+```
+
+- A `charts` entry is keyed by repository, chart and version, like
+  `crds.yaml`. A manifest-only component uses a `manifests` entry keyed
+  by its vendored `operatorImage`.
+- Each image needs a tag or digest, and a `source` naming where the
+  reference comes from. Read it from the chart or operator source at
+  that version, and check that it pulls.
+- `enabledBy`, allowed only on `charts` entries, names a values path.
+  `aicr mirror list` includes the image only when that path is `true`.
+  The BOM always includes it.
+
+**Lookup.** An entry matches by chart name and version, and the deployed
+repository's entry wins. When that repository has no entry for the chart
+at any version, as for a mirrored chart, the single entry from another
+repository applies. With no match, `make bom-docs` fails, and
+`aicr mirror list` warns and omits the component's declared images.
+
+**Overlays.** A `--data` copy of `images.yaml` replaces the embedded
+file, so it must keep an entry for every pin its recipes deploy. An
+`--external-only` catalog without the file declares nothing for that
+component.
+
+**Gate.** `TestDeclaredImagesAnchored`, run by `make test`, fails when:
+
+- a deployed chart pin or vendored operator image has no entry
+- a version the BOM surveys resolves to no entry
+- an entry matches nothing deployed or surveyed
+- a component in `declaredRequiredComponents` loses its file
+
+It does not check the committed BOM, so run `make bom-docs` after any
+change to an `images.yaml`.
+
+**Checking a cluster.** Compare a cluster's k8s-aibom inventory with
+`aicr mirror list` for its recipe, from a clone of this repository:
+
+```shell
+aicr mirror list --recipe recipe.yaml --format json > mirror.json
+kubectl get aiboms -A -o json > aiboms.json
+go run ./tools/declared-images-diff -mirror-list mirror.json -aibom aiboms.json
+```
+
+It prints each running image the list does not cover, and exits 1 if
+there is one. The output also includes the workloads' own images, such
+as a model server, which no component declares. Add an entry only for an
+image a component's operator launches or injects.
+
+k8s-aibom records only AI workloads in the namespaces it watches. So the
+check catches an image an operator injects into a workload, such as
+`grove-initc`, but not an operator's own operands.
+See [ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md).
 
 ## Boundary: Components Are Metadata
 

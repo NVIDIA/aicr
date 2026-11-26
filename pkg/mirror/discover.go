@@ -115,6 +115,10 @@ type mirrorCandidate struct {
 // recipe carries no bound provider, reads fall back to the package-global
 // embedded provider inside recipe.GetManifestContentWithContext.
 //
+// Each component also contributes the images its images.yaml declares for the
+// chart version it deploys, such as images its operator launches at run time.
+// A component whose images.yaml has no entry for that version gets a warning.
+//
 // A component whose values cannot be hydrated is a fatal error, not a warning.
 // The returned MirrorList is a completeness claim — the full set of images an
 // operator relocates into a disconnected registry — and a component that fails
@@ -162,7 +166,10 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 				Type:      strings.ToLower(string(compRef.Type)),
 			}
 
-			var allImages []string
+			var (
+				allImages []string
+				values    map[string]any
+			)
 
 			// Helm components with an external chart: render it and extract
 			// images. Manifest-only refs (neither chart nor source) have no
@@ -170,7 +177,8 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 			// below, so invoking Helm with a fabricated chart name would only
 			// produce a spurious warning.
 			if compRef.Type == recipe.ComponentTypeHelm && compRef.HasExternalChart() {
-				values, prevalidated := candidate.profileValues[compRef.Name]
+				var prevalidated bool
+				values, prevalidated = candidate.profileValues[compRef.Name]
 				if !prevalidated {
 					// A values-load failure is deterministic and structural (a
 					// missing or unreadable values file, or a provider-binding
@@ -284,6 +292,12 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					}
 				}
 			}
+
+			declared, declaredErr := declaredImages(gctx, dp, compRef, values, allImages, &ci)
+			if declaredErr != nil {
+				return declaredErr
+			}
+			allImages = append(allImages, declared...)
 
 			slices.Sort(allImages)
 			ci.Images = slices.Compact(allImages)

@@ -23,6 +23,7 @@
 
 # Serving release the operator installs. Must be one the pinned operator
 # image bundles: knative-operator v1.23.1 bundles 1.20.0 to 1.23.0.
+# components/knative-operator/images.yaml declares this release's images.
 version: "1.23.0"
 
 # Rendered verbatim as spec.config: one key per Knative ConfigMap, without

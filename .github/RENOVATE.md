@@ -103,6 +103,12 @@ asserts a CRD, the bump PR must also commit the
 `recipes/components/<name>/crds.yaml` that `make crd-inventory` regenerates.
 `TestHealthCheckCRDAssertionsAnchored` fails `make test` until it does.
 
+If the component has a `recipes/components/<name>/images.yaml`, the bump PR
+must also re-read the images its operator launches at the new version and
+update that file. `TestDeclaredImagesAnchored` fails `make test` until it does.
+A digest change to the operator image of a vendored manifest needs the same
+update.
+
 Unlike the `.settings.yaml` manager, these annotations carry `registryUrl`
 inline:
 

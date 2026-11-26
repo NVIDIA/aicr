@@ -472,6 +472,17 @@ func surveyComponent(
 	for i := range images {
 		res.Images = append(res.Images, i)
 	}
+
+	declared, err := readDeclaredImages(repoRoot, c, version, res.Images)
+	if err != nil {
+		return res, err
+	}
+	for _, i := range declared {
+		if _, seen := images[i]; !seen {
+			images[i] = struct{}{}
+			res.Images = append(res.Images, i)
+		}
+	}
 	sort.Strings(res.Images)
 	return res, nil
 }
