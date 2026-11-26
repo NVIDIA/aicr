@@ -605,7 +605,10 @@ component.
 - a component in `declaredRequiredComponents` loses its file
 
 It does not check the committed BOM, so run `make bom-docs` after any
-change to an `images.yaml`.
+change to an `images.yaml`. `make bom-docs` also pulls the Knative
+operator image and fails unless the `knative-operator` entry lists
+exactly the images in the Serving and Kourier manifests that image
+carries.
 
 **Checking a cluster.** Compare a cluster's k8s-aibom inventory with
 `aicr mirror list` for its recipe, from a clone of this repository:

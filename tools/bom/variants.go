@@ -184,7 +184,7 @@ func walkYAML(ctx context.Context, root *os.Root, dir string) ([]string, error) 
 		if werr != nil {
 			return werr
 		}
-		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+		if d.IsDir() || filepath.Ext(path) != yamlExt {
 			return nil
 		}
 		// Symlinks are collected, not skipped: root.Open resolves them under

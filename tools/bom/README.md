@@ -85,6 +85,11 @@ supply-chain dashboards without conversion.
   does not appear in that render, or appears in the default render, fails
   the run in every mode. A failed gated render is a warning, so it fails
   only under `-strict`. `-skip-helm` skips the check.
+- The `knative-operator` entry must list exactly the images in the Serving
+  and Kourier manifests its operator image carries for the Serving release
+  `knative-serving` requests. The run pulls that image to compare them, and
+  fails on any difference. An unreachable registry is a warning, so it fails
+  only under `-strict`. `-skip-helm` skips the check.
 - A Helm chart that legitimately renders no images (CRD-only charts) must be
   listed in `expectedNoImages` in `main.go`, with a reason. Under `-strict`,
   an unlisted chart with zero images fails, and a listed chart that starts

@@ -44,7 +44,10 @@ import (
 	"aicr.run/pkg/recipe"
 )
 
-const crdsOnly = "CRDs only"
+const (
+	crdsOnly = "CRDs only"
+	yamlExt  = ".yaml"
+)
 
 // expectedNoImages names the Helm components whose chart legitimately renders
 // no container images, with the reason. In strict mode a Helm component that
@@ -136,7 +139,6 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "survey components")
 	}
-
 	// Version variants: explicit base/overlay/mixin Helm pins that differ
 	// from the registry default, derived from the recipe data itself and
 	// rendered at catalog parity (issue #1611).
@@ -321,6 +323,11 @@ func surveyComponents(
 		}
 		results = append(results, result)
 	}
+	if !skipHelm {
+		if err := verifyKnativeResult(ctx, repoRoot, results, readImageFiles); err != nil {
+			return nil, err
+		}
+	}
 	return results, nil
 }
 
@@ -432,7 +439,7 @@ func surveyComponent(
 			if d.IsDir() {
 				return nil
 			}
-			if ext := filepath.Ext(path); ext != ".yaml" && ext != ".yml" {
+			if ext := filepath.Ext(path); ext != yamlExt && ext != ".yml" {
 				return nil
 			}
 			data, rerr := os.ReadFile(path) //nolint:gosec // path is bounded by manifestsDir under the repo root
