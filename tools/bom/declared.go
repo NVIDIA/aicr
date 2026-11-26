@@ -35,8 +35,9 @@ import (
 	"aicr.run/pkg/helm"
 )
 
-// declaredRequiredComponents names the components whose operators launch
-// images that no rendered template shows. Each must keep an images.yaml, so
+// declaredRequiredComponents names the components that deploy images no
+// default render shows, ones an operator launches or a chart renders only
+// behind a value the default values leave off. Each must keep an images.yaml, so
 // deleting one fails the survey instead of narrowing the BOM.
 var declaredRequiredComponents = map[string]struct{}{
 	"dynamo-platform":            {},

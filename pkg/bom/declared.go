@@ -30,7 +30,8 @@ import (
 )
 
 // DeclaredImagesFile is the name of the file, beside a component's values in
-// recipes/components/<name>/, that declares the images its operator launches.
+// recipes/components/<name>/, that declares the images it deploys that no
+// default render shows.
 const DeclaredImagesFile = "images.yaml"
 
 const declaredRereadHint = "Read the images its operator launches at that version and add an entry, " +
