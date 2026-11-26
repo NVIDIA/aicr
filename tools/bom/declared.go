@@ -66,11 +66,24 @@ func readDeclaredImages(repoRoot string, c component, version string, rendered [
 	if err != nil || !found {
 		return nil, err
 	}
-	var chart string
+
+	var images []bom.DeclaredImage
 	if c.kind() == kindHelm {
-		chart = c.effectiveChart()
+		entry, chartErr := d.ChartFor(c.Helm.DefaultRepository, c.effectiveChart(), version)
+		if chartErr != nil {
+			return nil, chartErr
+		}
+		images = entry.Images
+	} else {
+		entries, manifestErr := d.ManifestsFor(rendered)
+		if manifestErr != nil {
+			return nil, manifestErr
+		}
+		for _, m := range entries {
+			images = append(images, m.Images...)
+		}
 	}
-	return d.ImagesFor(c.Helm.DefaultRepository, chart, version, rendered)
+	return images, nil
 }
 
 // verifyEnabledBy renders c once for each enabledBy path in declared, with

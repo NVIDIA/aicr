@@ -66,14 +66,23 @@ func declaredImages(
 		return nil, err
 	}
 
-	var chart string
+	var images []bom.DeclaredImage
 	if ref.Type == recipe.ComponentTypeHelm && ref.HasExternalChart() {
-		chart = ref.EffectiveChart()
-	}
-	images, err := d.ImagesFor(ref.Source, chart, ref.Version, scanned)
-	if err != nil {
-		warnDeclared(ci, ref.Name, err)
-		return nil, nil
+		c, chartErr := d.ChartFor(ref.Source, ref.EffectiveChart(), ref.Version)
+		if chartErr != nil {
+			warnDeclared(ci, ref.Name, chartErr)
+			return nil, nil
+		}
+		images = c.Images
+	} else {
+		entries, manifestErr := d.ManifestsFor(scanned)
+		if manifestErr != nil {
+			warnDeclared(ci, ref.Name, manifestErr)
+			return nil, nil
+		}
+		for _, m := range entries {
+			images = append(images, m.Images...)
+		}
 	}
 
 	out := make([]string, 0, len(images))
