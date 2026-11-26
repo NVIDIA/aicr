@@ -36,8 +36,8 @@ GPU Operator installs as Helm release `gpu-operator` in namespace
 ## Generate and inspect
 
 Mistral nodes are provisioned by Metal3. A snapshot resolves
-`service=mistral` when its nodes also carry the `mistralcompute.ai/node-pool`
-label; without the label it reports `metal3`.
+`service=mistral` when its nodes also carry a non-empty
+`mistralcompute.ai/node-pool` label; without one it reports `metal3`.
 
 ```bash
 aicr snapshot --node-selector nvidia.com/gpu.present=true --output snapshot.yaml
@@ -71,5 +71,6 @@ conformance validation are inherited from the GB300 recipes and run against
 whichever GPU Operator is installed; Mistral's installation uses the
 `gpu-operator` namespace those checks read. The NVLS benchmark uses the
 `gb300/mistral` runtime, which starts from `gb300/generic` and has the same
-823 GB/s floor. No driver version is pinned under
+823 GB/s threshold. The validator applies a 10% tolerance, so a run passes at
+740.7 GB/s or more. No driver version is pinned under
 `mistral-managed`: Mistral owns that lifecycle.

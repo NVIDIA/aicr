@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"aicr.run/pkg/allocpolicy"
 	aicrerrors "aicr.run/pkg/errors"
 
 	"aicr.run/pkg/errors/errorstest"
@@ -322,13 +323,24 @@ func TestValidateProfileDeclaration(t *testing.T) {
 			decl: &ProfileDeclaration{
 				Name: "mode", Default: "one",
 				Values: map[string]ProfileValue{
-					"one": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": false}}}},
+					"one": {Advertiser: allocpolicy.AdvertiserExternal, ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": false}}}},
 					"two": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": true}}}},
 				},
 			},
 			wantOwned: map[string][]string{
 				"gpu-operator": {"enabled", "install"},
 			},
+		},
+		{
+			name: "gating off the GPU Operator requires advertiser external",
+			decl: &ProfileDeclaration{
+				Name: "mode", Default: "one",
+				Values: map[string]ProfileValue{
+					"one": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": false}}}},
+					"two": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": true}}}},
+				},
+			},
+			wantErr: "must declare advertiser: external",
 		},
 		{
 			name:    "root install gate must be a bool",

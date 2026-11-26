@@ -290,7 +290,7 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 			}
 			seenComponents[ref.Name] = struct{}{}
 
-			if err := validateProfileDeploymentGates(decl.Name, valueName, ref); err != nil {
+			if err := validateProfileDeploymentGates(decl.Name, valueName, value.Advertiser, ref); err != nil {
 				return nil, err
 			}
 			paths, err := flattenProfileOverrides(ref.Overrides)
@@ -340,8 +340,10 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 }
 
 // validateProfileDeploymentGates rejects a root enabled key and accepts a root
-// install key only as a bool on a reference that owns presence.
-func validateProfileDeploymentGates(profile, value string, ref ProfileComponentRef) error {
+// install key only as a bool on a reference that owns presence. A value that
+// gates off the GPU Operator removes its device plugin from the #1327 closure,
+// so it must declare advertiser: external.
+func validateProfileDeploymentGates(profile, value, advertiser string, ref ProfileComponentRef) error {
 	if _, assignsEnabled := ref.Overrides[profileComponentEnabledPath]; assignsEnabled {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("profile %q value %q component %q may not assign overrides.enabled",
@@ -361,7 +363,22 @@ func validateProfileDeploymentGates(profile, value string, ref ProfileComponentR
 			fmt.Sprintf("profile %q value %q optional component %q may not assign overrides.install",
 				profile, value, ref.Name))
 	}
+	installs, _ := install.(bool)
+	operator := ref.Name == allocpolicy.ComponentGPUOperator || ref.Name == allocpolicy.ComponentGPUOperatorOCP
+	if !installs && operator && advertiser != allocpolicy.AdvertiserExternal {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q gates off %q, so it must declare advertiser: %s",
+				profile, value, ref.Name, allocpolicy.AdvertiserExternal))
+	}
 	return nil
+}
+
+// profileInstallGateDropped reports whether a component the selected profile
+// gates through install is absent from the recipe, as a bundle's emitted recipe
+// leaves a component that gate turned off; ValidateProfileLock held its
+// presence to the selected value when the bundle was built.
+func profileInstallGateDropped(ref *ComponentRef, ownedPaths []string) bool {
+	return ref == nil && slices.Contains(ownedPaths, profileComponentInstallPath)
 }
 
 // profileInstallGatedOff reports whether a component is disabled solely by a
@@ -912,7 +929,7 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 			if !slices.Contains(paths, profileComponentEnabledPath) {
 				continue
 			}
-			if profileInstallGatedOff(ref, declared[component]) {
+			if profileInstallGatedOff(ref, declared[component]) || profileInstallGateDropped(ref, declared[component]) {
 				continue
 			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -1297,11 +1314,12 @@ func (r *RecipeResult) ValidateProfileLock(
 		if !presenceOwned && (baselineRef == nil || !baselineRef.IsEnabled() || !candidateEnabled[component]) {
 			continue
 		}
-		if baselineRef == nil {
+		owned := r.Metadata.SelectedProfile.OwnedPaths[component]
+		if baselineRef == nil && !profileInstallGateDropped(baselineRef, owned) {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is absent from the recipe", component))
 		}
-		if profileInstallGatedOff(baselineRef, r.Metadata.SelectedProfile.OwnedPaths[component]) {
+		if baselineRef == nil || profileInstallGatedOff(baselineRef, owned) {
 			if candidateEnabled[component] {
 				return errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("profile-owned component presence diverged for %q", component))

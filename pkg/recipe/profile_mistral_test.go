@@ -174,3 +174,37 @@ func TestMistralProfileQualification(t *testing.T) {
 		})
 	}
 }
+
+// TestMistralEmittedRecipeReloads fails when a bundle's emitted recipe, which
+// drops the components mistral-managed gates off, no longer validates.
+func TestMistralEmittedRecipeReloads(t *testing.T) {
+	t.Parallel()
+	result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), mistralCriteria(), "gpuStack=mistral-managed")
+	if err != nil {
+		t.Fatalf("resolve Mistral recipe: %v", err)
+	}
+	emitted := *result
+	emitted.ComponentRefs = nil
+	for _, ref := range result.ComponentRefs {
+		if ref.IsEnabled() {
+			emitted.ComponentRefs = append(emitted.ComponentRefs, ref)
+		}
+	}
+	if emitted.GetComponentRef("gpu-operator") != nil {
+		t.Fatal("fixture: gpu-operator should be gated off under mistral-managed")
+	}
+	if err := emitted.ValidateProfileValuesWithContext(t.Context()); err != nil {
+		t.Fatalf("emitted recipe does not reload: %v", err)
+	}
+
+	// A component the profile owns only through enabled stays required.
+	missing := emitted
+	missing.Metadata.SelectedProfile = &SelectedProfile{
+		Name: result.Metadata.SelectedProfile.Name, Value: result.Metadata.SelectedProfile.Value,
+		Advertiser: result.Metadata.SelectedProfile.Advertiser,
+		OwnedPaths: map[string][]string{"gpu-operator": {profileComponentEnabledPath}},
+	}
+	if err := missing.ValidateProfileValuesWithContext(t.Context()); err == nil {
+		t.Fatal("an absent component owned only through enabled must still fail")
+	}
+}
