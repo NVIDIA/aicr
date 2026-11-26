@@ -249,6 +249,28 @@ func TestSurveyComponentMergesDeclaredImages(t *testing.T) {
 	}
 }
 
+func TestContainsRef(t *testing.T) {
+	tests := []struct {
+		data string
+		ref  string
+		want bool
+	}{
+		{"image: nats:2.10", "nats:2.10", true},
+		{"image: docker.io/library/nats:2.10\n", "nats:2.10", true},
+		{`value: "nats:2.10"`, "nats:2.10", true},
+		{"image: nats:2.10.1", "nats:2.10", false},
+		{"image: nats:2.10@sha256:abc", "nats:2.10", false},
+		{"image: mynats:2.10", "nats:2.10", false},
+		{"image: nats:2.10.1 nats:2.10", "nats:2.10", true},
+		{"", "nats:2.10", false},
+	}
+	for _, tt := range tests {
+		if got := containsRef([]byte(tt.data), tt.ref); got != tt.want {
+			t.Errorf("containsRef(%q, %q) = %v, want %v", tt.data, tt.ref, got, tt.want)
+		}
+	}
+}
+
 func TestVerifyEnabledBy(t *testing.T) {
 	c := component{Name: "op", Helm: helmCfg{DefaultRepository: "https://charts.example.com",
 		DefaultChart: "example/op", DefaultVersion: "1.0.0"}}
@@ -278,6 +300,14 @@ func TestVerifyEnabledBy(t *testing.T) {
 		{
 			name: "gated image in the default render", base: a, gated: map[string]string{"a.enabled": a, "b.enabled": b},
 			wantMsg: "example.com/op/a:1.0.0 renders without a.enabled=true",
+		},
+		{
+			name: "longer tag does not match", gated: map[string]string{"a.enabled": a + ".1", "b.enabled": b},
+			wantMsg: "example.com/op/a:1.0.0 does not render with a.enabled=true",
+		},
+		{
+			name: "default render with a longer tag does not match", base: a + "-rc1",
+			gated: map[string]string{"a.enabled": a, "b.enabled": b},
 		},
 		{
 			name: "failed gated render is a warning", gated: map[string]string{"a.enabled": a, "b.enabled": b},

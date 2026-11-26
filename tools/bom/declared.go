@@ -109,9 +109,9 @@ func verifyEnabledBy(ctx context.Context, repoRoot string, c component, r helm.R
 		}
 		for _, img := range gated[p] {
 			switch {
-			case !bytes.Contains(out, []byte(img)):
+			case !containsRef(out, img):
 				problems = append(problems, fmt.Sprintf("%s does not render with %s=true", img, p))
-			case bytes.Contains(defaultRender, []byte(img)):
+			case containsRef(defaultRender, img):
 				problems = append(problems, fmt.Sprintf("%s renders without %s=true", img, p))
 			}
 		}
@@ -123,6 +123,31 @@ func verifyEnabledBy(ctx context.Context, repoRoot string, c component, r helm.R
 			map[string]any{componentContextKey: c.Name})
 	}
 	return warnings, nil
+}
+
+// containsRef reports whether ref occurs in data as a whole image reference,
+// with no reference character on either side. A preceding "/" is allowed, so
+// a short name such as nats:2.10 matches docker.io/library/nats:2.10.
+func containsRef(data []byte, ref string) bool {
+	for i := 0; i <= len(data); {
+		j := bytes.Index(data[i:], []byte(ref))
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(ref)
+		before := start == 0 || data[start-1] == '/' || !isRefByte(data[start-1])
+		after := end == len(data) || !isRefByte(data[end])
+		if before && after {
+			return true
+		}
+		i = start + 1
+	}
+	return false
+}
+
+// isRefByte reports whether b can appear in an image reference.
+func isRefByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || strings.IndexByte("._-:/@", b) >= 0
 }
 
 // loadDeclaredImages reads and parses the named component's images.yaml.
