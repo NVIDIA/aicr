@@ -423,13 +423,16 @@ components:
       # DNS prefix or over 53 characters, and stops releasing cordons it did not
       # place (#3207). v0.21.0 drains kube-system pods like any other
       # namespace, honoring any PodDisruptionBudget that covers them, rather
-      # than leaving them to be killed by the reboot (#3694). Every boundary here carries a
-      # transition record. The legacy skyhook.nvidia.com group, taint key, and
-      # metrics remain served through v0.21.x and are removed in v0.22.0, which
-      # is not reachable until the remaining skyhook.nvidia.com references in
-      # health checks and overlays are migrated.
+      # than leaving them to be killed by the reboot (#3694). v0.22.0 rejects
+      # dependsOn cycles at admission and paces a package version bump through
+      # the interruption budget, and its chart cannot be upgraded with
+      # --reuse-values from v0.21.0. Every boundary here carries a transition
+      # record. The legacy skyhook.nvidia.com group, taint key, and metrics
+      # remain served through v0.22.x and are removed in v0.23.0, which is not
+      # reachable until the remaining skyhook.nvidia.com references in health
+      # checks and overlays are migrated.
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.21.0
+      defaultVersion: v0.22.0
       defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
