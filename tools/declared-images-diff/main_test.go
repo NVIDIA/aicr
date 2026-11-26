@@ -122,6 +122,14 @@ func TestRun(t *testing.T) {
 			want: []string{},
 		},
 		{
+			name:   "metadata.component subject and its nested containers",
+			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+  "metadata": {"component": {"type": "container", "bom-ref": "s", "name": "nats", "version": "2.10.21-alpine",
+    "components": [{"type": "container", "bom-ref": "n", "name": "example.com/op/sidecar", "version": "1.0"}]}},
+  "components": [{"type": "container", "bom-ref": "a", "name": "example.com/op/agent", "version": "1.0.0"}]}`},
+			want: []string{"example.com/op/sidecar:1.0"},
+		},
+		{
 			name:   "same tag, other digest",
 			mirror: mirrorYAML, aiboms: []string{bomWith("example.com/op/locked:2.0@" + otherDigest)},
 			want: []string{"example.com/op/locked:2.0@" + otherDigest},

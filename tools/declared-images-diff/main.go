@@ -274,7 +274,8 @@ func runningImages(data []byte) ([]string, error) {
 }
 
 // bomImages returns the image reference of every container component in a
-// CycloneDX JSON document, nested components included.
+// CycloneDX JSON document, nested components and the metadata.component
+// subject included.
 func bomImages(data []byte) ([]string, error) {
 	var b cdx.BOM
 	if err := cdx.NewBOMDecoder(bytes.NewReader(data), cdx.BOMFileFormatJSON).Decode(&b); err != nil {
@@ -300,6 +301,11 @@ func bomImages(data []byte) ([]string, error) {
 			}
 		}
 		return nil
+	}
+	if b.Metadata != nil && b.Metadata.Component != nil {
+		if err := walk(&[]cdx.Component{*b.Metadata.Component}); err != nil {
+			return nil, err
+		}
 	}
 	if err := walk(b.Components); err != nil {
 		return nil, err
