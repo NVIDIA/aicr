@@ -103,7 +103,7 @@ func main() {
 	flag.StringVar(&outDir, "out-dir", "dist/bom", "directory to write bom.cdx.json and bom.md")
 	flag.StringVar(&aicrVersion, "aicr-version", "dev", "AICR version label embedded in the BOM")
 	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only walk embedded manifests)")
-	flag.BoolVar(&strict, "strict", false, "fail if any component fails to render, is missing a pinned chart version, or a Helm chart renders no images and is not in expectedNoImages, or the Knative operator image cannot be read")
+	flag.BoolVar(&strict, "strict", false, "fail on unpinned charts, render errors, an unreadable Knative operator image, or a Helm chart that renders no images and is not in expectedNoImages")
 	flag.BoolVar(&deterministic, "deterministic", false, "suppress per-run metadata (timestamps, version churn) in the Markdown output for committable artifacts")
 	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
 	flag.Parse()
@@ -135,7 +135,7 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load driver targets")
 	}
 
-	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets)
+	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets, readImageFiles)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "survey components")
 	}
@@ -309,6 +309,7 @@ func surveyComponents(
 	renderer helm.Renderer,
 	skipHelm bool,
 	driverTargets catalogDriverTargets,
+	readImage imageFileReader,
 ) ([]bom.ComponentResult, error) {
 
 	results := make([]bom.ComponentResult, 0, len(components))
@@ -324,7 +325,7 @@ func surveyComponents(
 		results = append(results, result)
 	}
 	if !skipHelm {
-		if err := verifyKnativeResult(ctx, repoRoot, results, readImageFiles); err != nil {
+		if err := verifyKnativeResult(ctx, repoRoot, results, readImage); err != nil {
 			return nil, err
 		}
 	}

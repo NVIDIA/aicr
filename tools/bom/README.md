@@ -87,7 +87,8 @@ supply-chain dashboards without conversion.
   chart is rendered again with that path set to `true`. A gated image that
   does not appear in that render, or appears in the default render, fails
   the run in every mode. A failed gated render is a warning, so it fails
-  only under `-strict`. `-skip-helm` skips the check.
+  only under `-strict`. `-skip-helm` skips the check, as does a failed
+  default render.
 - The `knative-operator` entry must list exactly the images in the Serving
   and Kourier manifests its operator image carries for the Serving release
   `knative-serving` requests. The run pulls that image to compare them, and

@@ -26,6 +26,7 @@ import (
 	"aicr.run/pkg/bom"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/helm/helmtest"
 )
 
 const (
@@ -203,6 +204,55 @@ func TestVerifyKnativeResult(t *testing.T) {
 			err := verifyKnativeResult(context.Background(), root, tt.results, read)
 			if reads != tt.reads || (err != nil) != tt.wantErr {
 				t.Errorf("reads = %d, error = %v, want %d reads and error %v", reads, err, tt.reads, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSurveyComponentsVerifiesKnative(t *testing.T) {
+	root := writeRecipeTree(t, map[string]string{
+		"components/knative-operator/images.yaml": knativeTestDeclared,
+		"components/knative-serving/values.yaml":  "version: \"1.23.0\"\n",
+	})
+	c := component{Name: knativeOperatorComponent, Helm: helmCfg{DefaultRepository: "https://knative.github.io/operator",
+		DefaultChart: "knative-operator", DefaultVersion: "v1.23.1"}}
+	mock := &helmtest.MockRenderer{Rendered: map[string][]byte{knativeOperatorComponent: []byte(
+		"kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n      - name: op\n        image: " +
+			knativeTestOperator + "\n")}}
+
+	tests := []struct {
+		name         string
+		skipHelm     bool
+		files        map[string][]byte
+		readErr      error
+		wantReads    int
+		wantWarnings int
+		wantErr      bool
+	}{
+		{name: "matching operator image", files: knativeTestFiles(), wantReads: 1},
+		{name: "mismatch fails", files: map[string][]byte{knativeTestServingDir + "/a.yaml": []byte("image: example.com/x:1\n"),
+			knativeTestIngressDir + "/b.yaml": []byte("image: example.com/kourier:1.23\n")}, wantReads: 1, wantErr: true},
+		{name: "unreachable registry is a warning", readErr: errors.New(errors.ErrCodeUnavailable, "fetch image"),
+			wantReads: 1, wantWarnings: 1},
+		{name: "skip-helm skips the check", skipHelm: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reads := 0
+			read := func(context.Context, string, []string) (map[string][]byte, error) {
+				reads++
+				return tt.files, tt.readErr
+			}
+			results, err := surveyComponents(context.Background(), root, []component{c}, mock, tt.skipHelm,
+				catalogDriverTargets{}, read)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("surveyComponents() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if reads != tt.wantReads {
+				t.Errorf("image reads = %d, want %d", reads, tt.wantReads)
+			}
+			if err == nil && len(results[0].Warnings) != tt.wantWarnings {
+				t.Errorf("warnings = %q, want %d", results[0].Warnings, tt.wantWarnings)
 			}
 		})
 	}
