@@ -208,7 +208,7 @@ for version in v3.0.4 v3.10.0 v4.0.0 v3.0.3; do
     else
       grep -q 'Provenance verified' "${root}/install.log" || fail "supported cosign did not verify the extracted release files"
       for argument in verify-blob-attestation https://slsa.dev/provenance/v1 https://token.actions.githubusercontent.com \
-        'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*'; do
+        '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/v1\.2\.3-rc1$'; do
         grep -Fxq -- "${argument}" "${root}/cosign-calls" || fail "cosign was not given ${argument}"
       done
     fi
@@ -221,12 +221,18 @@ done
 root="${SCRATCH}/cosign-failure"
 make_release "${root}" true
 make_cosign "${root}"
+mkdir -p "${root}/install dir"
+printf 'old binary\n' > "${root}/install dir/aicr"
+printf 'old attestation\n' > "${root}/install dir/${ATTESTATION}"
+cp "${root}/install dir/aicr" "${root}/before-binary"
+cp "${root}/install dir/${ATTESTATION}" "${root}/before-attestation"
 if INSTALL_RC_COSIGN_VERSION=v3.0.4 INSTALL_RC_COSIGN_RESULT=1 run_installer "${root}"; then
-  assert_attestation "${root}"
-  grep -q 'Attestation verification failed' "${root}/install.log" || fail "cosign failure was not reported"
-else
-  fail "optional cosign failure prevented installation"
+  fail "failed provenance verification still installed the binary"
+elif ! grep -q 'Provenance verification failed' "${root}/install.log"; then
+  fail "provenance failure was not reported"
 fi
+cmp -s "${root}/before-binary" "${root}/install dir/aicr" || fail "failed verification replaced the existing binary"
+cmp -s "${root}/before-attestation" "${root}/install dir/${ATTESTATION}" || fail "failed verification changed the existing attestation"
 
 # Force the directory-creation fallback even when the test runs as root. The
 # sudo stub runs without changing privileges and records the real install/rm.
