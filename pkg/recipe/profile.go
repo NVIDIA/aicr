@@ -373,12 +373,14 @@ func validateProfileDeploymentGates(profile, value, advertiser string, ref Profi
 	return nil
 }
 
-// profileInstallGateDropped reports whether a component the selected profile
-// gates through install is absent from the recipe, as a bundle's emitted recipe
-// leaves a component that gate turned off; ValidateProfileLock held its
-// presence to the selected value when the bundle was built.
-func profileInstallGateDropped(ref *ComponentRef, ownedPaths []string) bool {
-	return ref == nil && slices.Contains(ownedPaths, profileComponentInstallPath)
+// ProfileGatedOff reports whether the selected profile's install gate turned
+// ref off. Such a component stays in the recipe inventory, including a
+// bundle's emitted recipe, so a reload can check it against the value.
+func (r *RecipeResult) ProfileGatedOff(ref *ComponentRef) bool {
+	if r == nil || r.Metadata.SelectedProfile == nil || ref == nil {
+		return false
+	}
+	return profileInstallGatedOff(ref, r.Metadata.SelectedProfile.OwnedPaths[ref.Name])
 }
 
 // profileInstallGatedOff reports whether a component is disabled solely by a
@@ -929,7 +931,7 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 			if !slices.Contains(paths, profileComponentEnabledPath) {
 				continue
 			}
-			if profileInstallGatedOff(ref, declared[component]) || profileInstallGateDropped(ref, declared[component]) {
+			if profileInstallGatedOff(ref, declared[component]) {
 				continue
 			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -1314,12 +1316,11 @@ func (r *RecipeResult) ValidateProfileLock(
 		if !presenceOwned && (baselineRef == nil || !baselineRef.IsEnabled() || !candidateEnabled[component]) {
 			continue
 		}
-		owned := r.Metadata.SelectedProfile.OwnedPaths[component]
-		if baselineRef == nil && !profileInstallGateDropped(baselineRef, owned) {
+		if baselineRef == nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is absent from the recipe", component))
 		}
-		if baselineRef == nil || profileInstallGatedOff(baselineRef, owned) {
+		if profileInstallGatedOff(baselineRef, r.Metadata.SelectedProfile.OwnedPaths[component]) {
 			if candidateEnabled[component] {
 				return errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("profile-owned component presence diverged for %q", component))

@@ -175,7 +175,8 @@ func TestMistralProfileQualification(t *testing.T) {
 }
 
 // TestMistralEmittedRecipeReloads fails when a bundle's emitted recipe, which
-// drops the components mistral-managed gates off, no longer validates.
+// keeps the gated-off references with install: false, no longer validates, or
+// when a recipe that lost a gated reference still does.
 func TestMistralEmittedRecipeReloads(t *testing.T) {
 	t.Parallel()
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), mistralCriteria(), "gpuStack=mistral-managed")
@@ -184,27 +185,29 @@ func TestMistralEmittedRecipeReloads(t *testing.T) {
 	}
 	emitted := *result
 	emitted.ComponentRefs = nil
-	for _, ref := range result.ComponentRefs {
-		if ref.IsEnabled() {
+	for i := range result.ComponentRefs {
+		ref := result.ComponentRefs[i]
+		if ref.IsEnabled() || result.ProfileGatedOff(&ref) {
 			emitted.ComponentRefs = append(emitted.ComponentRefs, ref)
 		}
 	}
-	if emitted.GetComponentRef("gpu-operator") != nil {
-		t.Fatal("fixture: gpu-operator should be gated off under mistral-managed")
+	if ref := emitted.GetComponentRef("gpu-operator"); ref == nil || !emitted.ProfileGatedOff(ref) {
+		t.Fatal("fixture: gpu-operator should stay in the recipe, gated off under mistral-managed")
 	}
 	if err := emitted.ValidateProfileValuesWithContext(t.Context()); err != nil {
 		t.Fatalf("emitted recipe does not reload: %v", err)
 	}
 
-	// A component the profile owns only through enabled stays required.
-	missing := emitted
-	missing.Metadata.SelectedProfile = &SelectedProfile{
-		Name: result.Metadata.SelectedProfile.Name, Value: result.Metadata.SelectedProfile.Value,
-		Advertiser: result.Metadata.SelectedProfile.Advertiser,
-		OwnedPaths: map[string][]string{"gpu-operator": {profileComponentEnabledPath}},
+	// Absence cannot be checked against the selected value, so it fails.
+	dropped := emitted
+	dropped.ComponentRefs = nil
+	for _, ref := range emitted.ComponentRefs {
+		if ref.Name != "gpu-operator" {
+			dropped.ComponentRefs = append(dropped.ComponentRefs, ref)
+		}
 	}
-	if err := missing.ValidateProfileValuesWithContext(t.Context()); err == nil {
-		t.Fatal("an absent component owned only through enabled must still fail")
+	if err := dropped.ValidateProfileValuesWithContext(t.Context()); err == nil {
+		t.Fatal("a recipe without the gated gpu-operator reference must fail")
 	}
 }
 

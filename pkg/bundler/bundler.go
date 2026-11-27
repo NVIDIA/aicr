@@ -160,6 +160,11 @@ type bundleRun struct {
 
 	// warnings stores warning messages to be added to deployment notes.
 	warnings []string
+
+	// profileGated holds the references the selected profile's install gate
+	// turned off. Deployers never see them, but recipe.yaml keeps them so a
+	// reload can hold their absence to the selected value.
+	profileGated []recipe.ComponentRef
 }
 
 // Option defines a functional option for configuring DefaultBundler.
@@ -330,6 +335,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	}
 	recipeResult = &validated
 	profileBaseline := recipeResult
+	r.profileGated = profileGatedRefs(profileBaseline)
 
 	if err := r.enforceConfigurationOwnership(recipeResult); err != nil {
 		return nil, err
@@ -1667,7 +1673,7 @@ func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipe
 		output.Files = append(output.Files, guidePath)
 		output.TotalSize += guideSize
 	}
-	recipeSize, writeErr := r.writeRecipeFile(recipeResult, dir)
+	recipeSize, writeErr := r.writeRecipeFile(r.emittedRecipe(recipeResult), dir)
 	if writeErr != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
@@ -3893,6 +3899,34 @@ func writeBinaryAttestation(dir, publishedDir string, data []byte) error {
 	slog.Info("binary attestation copied into bundle",
 		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BinaryAttestationFile)))
 	return nil
+}
+
+// profileGatedRefs returns the references the selected profile's install gate
+// turned off, in recipe order.
+func profileGatedRefs(rr *recipe.RecipeResult) []recipe.ComponentRef {
+	var gated []recipe.ComponentRef
+	for i := range rr.ComponentRefs {
+		if rr.ProfileGatedOff(&rr.ComponentRefs[i]) {
+			gated = append(gated, rr.ComponentRefs[i])
+		}
+	}
+	return gated
+}
+
+// emittedRecipe is the recipe written to recipe.yaml: the deployed components
+// plus the ones the selected profile gated off.
+func (r *bundleRun) emittedRecipe(recipeResult *recipe.RecipeResult) *recipe.RecipeResult {
+	if len(r.profileGated) == 0 {
+		return recipeResult
+	}
+	emitted := *recipeResult
+	emitted.ComponentRefs = slices.Clone(recipeResult.ComponentRefs)
+	for _, ref := range r.profileGated {
+		if recipeResult.GetComponentRef(ref.Name) == nil {
+			emitted.ComponentRefs = append(emitted.ComponentRefs, ref)
+		}
+	}
+	return &emitted
 }
 
 // writeRecipeFile serializes the recipe to the bundle directory.
