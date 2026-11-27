@@ -37,7 +37,7 @@ pyparsing==3.3.3
 python-dateutil==4.0.0
 rdflib==7.6.0
 referencing==0.37.0
-regex==2026.11.19
+regex==2026.11.23
 rfc3986==1.5.0
 rpds-py==2026.9.1
 segments==2.4.0
