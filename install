@@ -367,7 +367,8 @@ main() {
       step "Verifying provenance attestation (Sigstore cosign)..."
       info "Confirms this binary was built by the AICR release workflow in NVIDIA/aicr, not a third-party rebuild"
       cosign_stderr=$(mktemp)
-      identity_re="^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/$(printf '%s' "$version" | sed 's/\./\\./g')\$"
+      tag_re=${version//./\\.}
+      identity_re="^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/${tag_re}\$"
       if cosign verify-blob-attestation \
         --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
         --type https://slsa.dev/provenance/v1 \

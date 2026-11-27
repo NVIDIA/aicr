@@ -228,7 +228,8 @@ if [[ -f "$ATTEST_SRC" ]]; then
       log_warning "Installed cosign version ($COSIGN_VERSION) is older than the minimum required ($COSIGN_MIN_VERSION); skipping provenance verification"
     else
       log_info "Verifying provenance attestation (Sigstore cosign)…"
-      identity_re="^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/$(printf '%s' "$TAG" | sed 's/\./\\./g')\$"
+      tag_re=${TAG//./\\.}
+      identity_re="^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/${tag_re}\$"
       if cosign verify-blob-attestation \
         --bundle "$ATTEST_SRC" \
         --type https://slsa.dev/provenance/v1 \
