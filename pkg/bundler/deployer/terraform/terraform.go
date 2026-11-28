@@ -245,7 +245,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			"failed to validate dependency graph")
 	}
 
-	lfComponents := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues)
+	var pinnedChartDigests map[string]string
+	if g.VendorCharts {
+		var err error
+		pinnedChartDigests, err = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), sortedRefs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	lfComponents := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues, pinnedChartDigests)
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
@@ -469,6 +477,7 @@ func toLocalformatComponents(
 	refs []recipe.ComponentRef,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
+	chartDigests map[string]string,
 ) []localformat.Component {
 
 	out := make([]localformat.Component, 0, len(refs))
@@ -479,6 +488,7 @@ func toLocalformatComponents(
 			Repository:   ref.Source,
 			ChartName:    ref.EffectiveChart(),
 			Version:      ref.Version,
+			ChartDigest:  chartDigests[ref.Name],
 			IsOCI:        strings.HasPrefix(ref.Source, "oci://"),
 			Tag:          ref.Tag,
 			Path:         ref.Path,
