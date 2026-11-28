@@ -39,5 +39,5 @@ charts:
       - workloadpriorityclasses.kueue.x-k8s.io
       - workloads.kueue.x-k8s.io
     repository: oci://registry.k8s.io/kueue/charts
-    sourceVersion: 0.19.13
+    sourceVersion: 0.19.14
 component: kueue

@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nvsentinel-mongodb
+transitions:
+  # from starts at 1.23.3, the release AICR pinned before 1.23.4 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=1.23.3 <1.23.4"
+    to: "1.23.4"
+    verdict: safe
+    verifiedBy: >-
+      Release psmdb-db-1.23.4 (percona/percona-helm-charts), published with
+      psmdb-operator 1.23.2, which AICR already pins: the chart's default
+      crVersion and images move to operator v1.23.1, but AICR's values set
+      crVersion 1.23.0 and every image by digest. helm template of 1.23.3 and
+      1.23.4 with AICR's values renders the same PerconaServerMongoDB object,
+      differing only in the helm.sh/chart and app.kubernetes.io/version
+      labels.
+    summary: >-
+      Chart-only change for AICR: the rendered cluster spec, crVersion and
+      images are unchanged, so the operator does not restart mongod.
+    references:
+      - https://github.com/percona/percona-helm-charts/releases/tag/psmdb-db-1.23.4
+      - https://github.com/percona/percona-server-mongodb-operator/releases/tag/v1.23.1

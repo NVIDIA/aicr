@@ -41,7 +41,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 |-----------|------|-------|----------------|--------|
 | agentgateway | helm | agentgateway | v1.5.0 | 1 |
 | agentgateway-crds | helm | agentgateway-crds | v1.5.0 | 0 |
-| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.68.0 | 6 |
+| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.68.1 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.5 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
@@ -67,7 +67,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 88.6.5 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.4.0 | 4 |
 | kubeflow-training-operator | manifest | — | — | 1 |
-| kueue | helm | kueue | 0.19.13 | 1 |
+| kueue | helm | kueue | 0.19.14 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.2 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.7.1 | 20 |
@@ -77,14 +77,14 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nktp | helm | nktp | 0.2.0 | 8 |
-| node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
+| node-problem-detector | helm | node-problem-detector | 2.4.2 | 1 |
 | nodewright-customizations | manifest | — | — | 7 |
 | nodewright-operator | helm | nodewright | v0.22.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.12.0 | 5 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.32.0 | 6 |
-| nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
+| nvsentinel-mongodb | helm | psmdb-db | 1.23.4 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 31.0.1 | 0 |
@@ -93,9 +93,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | runai-cluster | helm | runai-cluster | 3.0.26 | 10 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
-| slinky-slurm | helm | slurm | 1.2.4 | 5 |
-| slinky-slurm-operator | helm | slurm-operator | 1.2.4 | 2 |
-| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.4 | 0 |
+| slinky-slurm | helm | slurm | 1.2.5 | 5 |
+| slinky-slurm-operator | helm | slurm-operator | 1.2.5 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.5 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.2 | 1 |
 | sriov-ib-networks | manifest | — | — | 0 |
@@ -124,12 +124,12 @@ _No images extracted._
 
 ### aws-ebs-csi-driver
 
-- `public.ecr.aws/csi-components/csi-attacher:v4.13.0-eksbuild.5`
-- `public.ecr.aws/csi-components/csi-node-driver-registrar:v2.18.0-eksbuild.5`
-- `public.ecr.aws/csi-components/csi-provisioner:v6.4.0-eksbuild.5`
-- `public.ecr.aws/csi-components/csi-resizer:v2.3.0-eksbuild.5`
-- `public.ecr.aws/csi-components/livenessprobe:v2.20.0-eksbuild.5`
-- `public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver:v1.68.0`
+- `public.ecr.aws/csi-components/csi-attacher:v4.13.0-eksbuild.6`
+- `public.ecr.aws/csi-components/csi-node-driver-registrar:v2.18.0-eksbuild.6`
+- `public.ecr.aws/csi-components/csi-provisioner:v6.4.0-eksbuild.6`
+- `public.ecr.aws/csi-components/csi-resizer:v2.3.0-eksbuild.6`
+- `public.ecr.aws/csi-components/livenessprobe:v2.20.0-eksbuild.6`
+- `public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver:v1.68.1`
 
 ### aws-efa
 
@@ -275,7 +275,7 @@ _No images extracted._
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.19.13`
+- `registry.k8s.io/kueue/kueue:v0.19.14`
 
 ### mariadb-operator
 
@@ -442,8 +442,8 @@ _No images extracted._
 
 ### slinky-slurm-operator
 
-- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.4`
-- `ghcr.io/slinkyproject/slurm-operator:1.2.4`
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.5`
+- `ghcr.io/slinkyproject/slurm-operator:1.2.5`
 
 ### slinky-slurm-operator-crds
 

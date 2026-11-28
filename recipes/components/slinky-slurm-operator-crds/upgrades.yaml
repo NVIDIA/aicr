@@ -46,3 +46,15 @@ transitions:
       upgrade.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.4/CHANGELOG/CHANGELOG-1.2.md
+  - from: ">=1.2.4 <1.2.5"
+    to: "1.2.5"
+    verdict: safe
+    verifiedBy: >-
+      Upstream changelog CHANGELOG-1.2.md (SlinkyProject/slurm-operator) at
+      v1.2.5: the entries are fixes and Go CVE updates with no CRD change.
+      helm template of 1.2.4 and 1.2.5 with AICR's values renders the same
+      6 CRDs byte for byte.
+    summary: >-
+      No CRD change. Nothing to change on upgrade.
+    references:
+      - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.5/CHANGELOG/CHANGELOG-1.2.md
