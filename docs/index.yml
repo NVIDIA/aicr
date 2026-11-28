@@ -134,6 +134,8 @@ navigation:
         path: integrator/nvke-gb300-setup.md
       - page: NVKE GB10 Setup
         path: integrator/nvke-gb10-setup.md
+      - page: Mistral GB300 Setup
+        path: integrator/mistral-gb300-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking

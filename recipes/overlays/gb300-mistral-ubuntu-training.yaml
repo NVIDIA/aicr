@@ -1,0 +1,133 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta2
+metadata:
+  name: gb300-mistral-ubuntu-training
+
+spec:
+  base: base
+
+  criteria:
+    service: mistral
+    accelerator: gb300
+    os: ubuntu
+    intent: training
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.35.0"
+
+  profile:
+    name: gpuStack
+    description: >-
+      Which installer owns the GPU Operator. "mistral-managed" (the default)
+      is a cluster created with Mistral's GPU Operator option: the recipe
+      installs no GPU Operator, and Mistral's device plugin advertises
+      nvidia.com/gpu. The Network Operator and NFD are Mistral's. A value
+      that installs the GPU Operator waits for a signal that tells Mistral's
+      installation apart from AICR's (ADR-015).
+    default: mistral-managed
+    values:
+      mistral-managed:
+        advertiser: external
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              install: false
+          # GPU HPA needs a qualified scrape of Mistral's DCGM exporter.
+          - name: prometheus-adapter
+            overrides:
+              install: false
+          # Mistral's NVIDIADriver pods do not carry the labeler's driver app label.
+          - name: nvsentinel
+            optional: true
+            overrides:
+              labeler: {assumeDriverInstalled: true}
+        constraints:
+          - name: GPU.hardware.driver-loaded
+            value: "true"
+            remediation: >-
+              mistral-managed expects the GPU driver from Mistral's GPU
+              Operator. Create the cluster with that option.
+          - name: K8s.policy.devicePlugin.enabled
+            value: "true"
+            remediation: >-
+              mistral-managed expects a ClusterPolicy from Mistral's GPU
+              Operator with its device plugin enabled. Create the cluster
+              with that option.
+
+  componentRefs:
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+        - prometheus-operator-crds
+        - nodewright-customizations
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+        toolkit:
+          enabled: true
+        devicePlugin:
+          enabled: true
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-gb300.yaml
+      overrides:
+        accelerator: gb300
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        enabled: false
+
+    - name: nktp
+      type: Helm
+      overrides:
+        metrics-server:
+          enabled: true
+
+  validation:
+    performance:
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 823"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

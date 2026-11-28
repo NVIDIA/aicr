@@ -6907,3 +6907,45 @@ func TestBuildDeployer_BundleChartVersion(t *testing.T) {
 		t.Errorf("Generator.BundleChartVersion = %q, want %q", got, "1.2.3+build.5")
 	}
 }
+
+// TestEmittedRecipeKeepsProfileGatedRefs fails when recipe.yaml loses a
+// component the selected profile gated off, which a reload then rejects.
+func TestEmittedRecipeKeepsProfileGatedRefs(t *testing.T) {
+	t.Parallel()
+	rr, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(t.Context(), &recipe.Criteria{
+		Service: recipe.CriteriaServiceMistral, Accelerator: recipe.CriteriaAcceleratorGB300,
+		OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
+	}, "gpuStack=mistral-managed")
+	if err != nil {
+		t.Fatalf("resolve Mistral recipe: %v", err)
+	}
+	gated := profileGatedRefs(rr)
+	names := make([]string, 0, len(gated))
+	for _, ref := range gated {
+		names = append(names, ref.Name)
+	}
+	if !slices.Contains(names, "gpu-operator") {
+		t.Fatalf("profileGatedRefs = %v, want gpu-operator", names)
+	}
+	deployed := *rr
+	deployed.ComponentRefs = nil
+	for _, ref := range rr.ComponentRefs {
+		if ref.IsEnabled() {
+			deployed.ComponentRefs = append(deployed.ComponentRefs, ref)
+		}
+	}
+	r := &bundleRun{profileGated: gated}
+	emitted := r.emittedRecipe(&deployed)
+	if emitted.GetComponentRef("gpu-operator") == nil {
+		t.Fatal("emitted recipe dropped the gated gpu-operator reference")
+	}
+	if deployed.GetComponentRef("gpu-operator") != nil {
+		t.Fatal("emittedRecipe mutated the deployed recipe")
+	}
+	if err := emitted.ValidateProfileValuesWithContext(t.Context()); err != nil {
+		t.Fatalf("emitted recipe does not reload: %v", err)
+	}
+	if got := (&bundleRun{}).emittedRecipe(&deployed); got != &deployed {
+		t.Error("without gated references the recipe should pass through unchanged")
+	}
+}

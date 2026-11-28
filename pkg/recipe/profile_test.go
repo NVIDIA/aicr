@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"aicr.run/pkg/allocpolicy"
 	aicrerrors "aicr.run/pkg/errors"
 
 	"aicr.run/pkg/errors/errorstest"
@@ -316,6 +317,40 @@ func TestValidateProfileDeclaration(t *testing.T) {
 				"enabled": map[string]any{"nested": true},
 			}),
 			wantErr: "may not assign overrides.enabled",
+		},
+		{
+			name: "root install gate owns presence",
+			decl: &ProfileDeclaration{
+				Name: "mode", Default: "one",
+				Values: map[string]ProfileValue{
+					"one": {Advertiser: allocpolicy.AdvertiserExternal, ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": false}}}},
+					"two": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": true}}}},
+				},
+			},
+			wantOwned: map[string][]string{
+				"gpu-operator": {"enabled", "install"},
+			},
+		},
+		{
+			name: "gating off the GPU Operator requires advertiser external",
+			decl: &ProfileDeclaration{
+				Name: "mode", Default: "one",
+				Values: map[string]ProfileValue{
+					"one": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": false}}}},
+					"two": {ComponentRefs: []ProfileComponentRef{{Name: "gpu-operator", Overrides: map[string]any{"install": true}}}},
+				},
+			},
+			wantErr: "must declare advertiser: external",
+		},
+		{
+			name:    "root install gate must be a bool",
+			decl:    withOverride("gpu-operator", map[string]any{"install": "false"}),
+			wantErr: "overrides.install must be a bool",
+		},
+		{
+			name:    "optional reference may not assign install",
+			decl:    withOptional("nvsentinel", true, true, map[string]any{"install": false}),
+			wantErr: "may not assign overrides.install",
 		},
 		{
 			name: "duplicate component",
