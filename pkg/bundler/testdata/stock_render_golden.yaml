@@ -6392,17 +6392,17 @@ rke2-sles:
   012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvsentinel/install.sh: 88363f6321e491211026e8aca9a99a75ed1893e7f6e576b9912697269cf15f95
   012-nvsentinel/upstream.env: a6151216963428877050a229dad68ce7e65a872fd7522cecc50172cd5609f3a7
-  012-nvsentinel/values.yaml: 20ecd28779aa9e6ce1736d4c1954a866af2314d56c036a2bf9345faa0ce67ddb
+  012-nvsentinel/values.yaml: 017d7a2ba167b0744b93293369c1b9a30e56cc3cb85ad786e41669dbfa9e5051
   013-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: e4afc872811c2a75f7214fe4a5929c10ceed6fdf486169aa509a61ae93535d5a
   UPGRADING.md: 90971feceb1796391040e063f356b92c675a485ef8938fe0fe1b0baca3d89f86
-  bundle-info.yaml: 9eac85609c4035e690205b68ee9d0c3bac79acecda7b2d5f8adc95c9ef8fa57d
-  checksums.txt: b28fc646c7f1d27395cbe389b0cbd62b4b60dd9e1714e13602b62650731aeef8
+  bundle-info.yaml: 00b68f4b478eb8e4db5c262b1b0b2c23a7b3328bcfb37f20ce7b70fa9249570d
+  checksums.txt: 5bcdd1e5b4c7394bb5c00cb862452dbd5241f069e45da3c30409d9e4ca56b3c4
   deploy.sh: c208f3fb64ed64b13337e3eeb8674a566c1bacf151c5ea6e7d79b368b5918c5f
-  recipe.yaml: 693ec9e1c542168f3bc43e00cd4646e6e8d6fe433ac218d15ca35a621e26e772
+  recipe.yaml: f61a28cb6b8b9e37956e39cd821bf0471c500a791a158479cc49f3b067fb16d2
 rtx-pro-6000-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7

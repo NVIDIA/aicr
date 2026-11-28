@@ -78,9 +78,23 @@ spec:
     # plugin mode the rke2 root turns on: no NRI plugin injects its management
     # device here. It takes the `nvidia` RuntimeClass the toolkit registers
     # instead, the pairing recipes/overlays/rke2.yaml documents.
+    #
+    # SLES 16 enforces SELinux by default and RKE2 runs with selinux: true,
+    # so confined (container_t) NVSentinel pods cannot use their host paths.
+    # In the pinned chart this setting covers platform-connectors, which
+    # otherwise cannot create /var/run/nvsentinel.sock (NVIDIA/NVSentinel#1953),
+    # and the syslog and NIC health monitors. The Deployments that publish
+    # through the socket and, with audit logging on, the Deployments that
+    # write audit logs need NVIDIA/NVSentinel#2563; gpu-health-monitor needs
+    # NVIDIA/NVSentinel#2565. Both take effect once AICR pins a release
+    # that includes them. spc_t is the setting NVSentinel's SUSE/RKE2 guide
+    # documents; nodes with SELinux disabled ignore it.
     - name: nvsentinel
       type: Helm
       overrides:
+        global:
+          seLinuxOptions:
+            type: spc_t
         metadata-collector:
           nriPlugin:
             enabled: false
