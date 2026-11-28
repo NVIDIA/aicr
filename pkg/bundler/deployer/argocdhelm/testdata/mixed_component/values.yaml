@@ -39,4 +39,6 @@ gpuoperator:
   driver:
     version: "580"
 repoURL: ""
+sizing:
+  nodeCount: 0
 targetRevision: ""

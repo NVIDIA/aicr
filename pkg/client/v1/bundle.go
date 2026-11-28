@@ -161,8 +161,9 @@ type BundleOptions struct {
 	// WorkloadSelector labels the workloads WorkloadGate protects.
 	WorkloadSelector map[string]string
 
-	// Nodes is the estimated node count used for capacity-aware rendering.
-	// 0 means unset.
+	// Nodes is the estimated GPU node count. It is written to the registry's
+	// nodeCountPaths and selects the memory tier of each component with a
+	// sizing file (ADR-030). 0 means unset.
 	Nodes int
 
 	// StorageClass / SharedStorageClass name the Kubernetes StorageClasses
@@ -486,8 +487,8 @@ func (c *Client) AdoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, ctx, or recipe is nil, when
 //     recipe lacks internal state (constructed outside Resolve/Load), when
-//     the recipe was produced by a different Client, or when the Client
-//     has been Closed.
+//     the recipe was produced by a different Client, when opts.Nodes is
+//     negative and opts.Config is nil, or when the Client has been Closed.
 //   - Allowlist and bundler errors propagate with their structured codes.
 func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts BundleOptions) (BundleArtifact, error) {
 	if c == nil {
@@ -505,6 +506,10 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	}
 	if err := c.assertOwns(recipe); err != nil {
 		return nil, err
+	}
+	if opts.Config == nil && opts.Nodes < 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("BundleOptions.Nodes must be zero or positive, got %d", opts.Nodes))
 	}
 
 	// Snapshot Client state under the read lock — same pattern as

@@ -38,4 +38,6 @@ deployer:
   namePrefix: ""
   project: default
 repoURL: ""
+sizing:
+  nodeCount: 0
 targetRevision: ""

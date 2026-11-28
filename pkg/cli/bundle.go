@@ -1154,7 +1154,7 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 			&cli.IntFlag{
 				Name:     "nodes",
 				Value:    0,
-				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+				Usage:    "Estimated number of GPU nodes. Written to nodeScheduling.nodeCountPaths in registry, and lowers the memory of controllers with a sizing table to the tier for that count. 0 = unset.",
 				Category: catScheduling,
 			},
 			&cli.StringFlag{

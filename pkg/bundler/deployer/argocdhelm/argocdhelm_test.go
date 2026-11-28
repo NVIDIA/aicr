@@ -1420,7 +1420,7 @@ spec:
 	}
 
 	_, _, err := transformApplication(
-		srcDir, templatesDir, folderName, componentName, "profilelock", []string{profileLockTemplateName},
+		srcDir, templatesDir, folderName, componentName, "profilelock", []string{profileLockTemplateName}, false,
 	)
 	if err == nil {
 		t.Fatal("transformApplication() error = nil, want collision rejection")
@@ -2157,7 +2157,7 @@ func TestConvertToSingleSourceWithValues(t *testing.T) {
 		},
 	}
 
-	err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator")
+	err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator", false)
 	if err != nil {
 		t.Fatalf("convertToSingleSourceWithValues() error = %v", err)
 	}
@@ -2262,7 +2262,7 @@ func TestConvertToSingleSource_MissingFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := convertToSingleSourceWithValues(tt.app, "test", "test")
+			err := convertToSingleSourceWithValues(tt.app, "test", "test", false)
 			if err == nil {
 				t.Error("expected error for malformed application")
 			}
@@ -2303,7 +2303,7 @@ func TestValuesBlockScalarMarshal(t *testing.T) {
 		},
 	}
 
-	if err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator"); err != nil {
+	if err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator", false); err != nil {
 		t.Fatalf("convertToSingleSourceWithValues error: %v", err)
 	}
 

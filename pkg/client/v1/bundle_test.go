@@ -530,3 +530,29 @@ func TestMakeBundle_RejectsSplitSupersededByConfig(t *testing.T) {
 		t.Fatalf("error = %v, want it to name config.WithSplit", err)
 	}
 }
+
+func TestMakeBundle_RejectsNegativeNodes(t *testing.T) {
+	t.Parallel()
+	client, rec := resolveEmbeddedTrainingRecipe(t)
+
+	_, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+		Nodes:     -1,
+		OutputDir: filepath.Join(t.TempDir(), "neg"),
+	})
+	assertInvalidRequest(t, err)
+}
+
+// TestMakeBundle_ConfigSupersedesNegativeNodes fails when a negative flat
+// Nodes is rejected although Config, which supersedes the flat fields, is set.
+func TestMakeBundle_ConfigSupersedesNegativeNodes(t *testing.T) {
+	t.Parallel()
+	client, rec := resolveEmbeddedTrainingRecipe(t)
+
+	if _, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+		Config:    config.NewConfig(),
+		Nodes:     -1,
+		OutputDir: filepath.Join(t.TempDir(), "cfg"),
+	}); err != nil {
+		t.Fatalf("MakeBundle with Config and Nodes -1: %v", err)
+	}
+}
