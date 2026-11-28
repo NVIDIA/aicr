@@ -100,11 +100,13 @@ func (s sentinelWriter) Write(p []byte) (int, error) { return s.g.writeSentinel(
 // guardOutput routes os.Stdout and os.Stderr through an outputGuard each and
 // sends sentinel lines straight to the original stdout. The returned stop
 // closes the pipes, waits up to drainTimeout for everything written to them
-// to be copied, then restores both streams and clears extrasOut. The wait is
-// bounded because a child process that inherited a pipe keeps it open past
-// the check. When it times out, any partial line already read is written
-// with a newline added, waiting up to drainTimeout more, since a stalled
-// destination can block that write too.
+// to be copied, then clears extrasOut. os.Stdout and os.Stderr stay on the
+// closed pipes, so a write after stop, such as from a goroutine the check
+// left running, fails and is dropped, so it never reaches the original
+// streams unfiltered. The wait is bounded because a child process that
+// inherited a pipe keeps it open past the check. When it times out, any
+// partial line already read is written with a newline added, waiting up to
+// drainTimeout more, since a stalled destination can block that write too.
 //
 // Errors:
 //   - ErrCodeInternal when a pipe cannot be created.
@@ -168,7 +170,6 @@ func guardOutput(drainTimeout time.Duration) (stop func(), err error) {
 			case <-timer.C:
 			}
 		}
-		os.Stdout, os.Stderr = stdout, stderr
 		extrasOut = nil
 	}, nil
 }

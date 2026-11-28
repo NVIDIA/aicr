@@ -246,8 +246,9 @@ jobs:
             # into the cluster, and the validator Jobs ImagePullBackOff.
             echo "AICR_VALIDATOR_IMAGE_TAG=latest"
             # That :latest pin is a mutable tag, which `validate
-            # --emit-attestation` refuses by default (#2873) because the
-            # predicate names validators by tag alone. Accepted here for the
+            # --emit-attestation` refuses by default unless it recorded the
+            # image's registry digest and platform. A side-loaded ko.local
+            # image has no registry digest. Accepted here for the
             # same reason uat-kind.yaml accepts it: these are ko.local images
             # side-loaded into a throwaway kind cluster, so there is no
             # registry the tag could be repointed in and no immutable tag to

@@ -16,12 +16,14 @@ package cli
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
 
 	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/logging/loggingtest"
 
 	"aicr.run/pkg/errors/errorstest"
 )
@@ -160,7 +162,7 @@ func TestBoolFlagOrConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logs := captureJSONLogs(t)
+			logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 			runWith(t, []cli.Flag{&cli.BoolFlag{Name: "b", Value: tt.flagDefault}}, tt.args, func(c *cli.Command) {
 				if got := boolFlagOrConfig(c, "b", tt.fallback); got != tt.want {
 					t.Errorf("got %v, want %v", got, tt.want)

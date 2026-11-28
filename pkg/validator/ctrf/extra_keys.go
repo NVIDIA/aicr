@@ -36,8 +36,14 @@ const (
 	// not this key is present, and uses the key to tell whether the image
 	// predates ExtraKeyObservationOnly or dropped the marker. The orchestrator
 	// also records a result's image and platform lines only when
-	// TrustsReportedImages accepts the key.
+	// TrustsReportedImages accepts the key and the same stamp carries
+	// ExtraKeyResultNonce.
 	ExtraKeyResultSchema = "resultSchema"
+
+	// ExtraKeyResultNonce carries, on the result-contract stamp, the nonce
+	// the orchestrator gave the validator Job (v1.ResultNonceEnv). The
+	// orchestrator strips it from every Extra line, so it is never published.
+	ExtraKeyResultNonce = "resultNonce"
 
 	// ExtraValueTrue is the published form of a true boolean extra.
 	ExtraValueTrue = "true"
@@ -61,10 +67,11 @@ func ResultSchemaVersions() []string {
 
 // TrustsReportedImages reports whether a result stamped with schema, its
 // ExtraKeyResultSchema value, came from an image that neutralizes relayed
-// output, so its ImageLinePrefix and PlatformLinePrefix lines can be
-// recorded. It reports true for version 2, the first image generation that
-// neutralizes relayed output, and for any later version. A value that is not
-// a canonical decimal is not trusted.
+// output. Its ImageLinePrefix and PlatformLinePrefix lines are recorded only
+// when this holds and the same stamp carries the Job's ExtraKeyResultNonce,
+// which a log rotated past the stamp lacks. It reports true for version 2,
+// the first image generation that neutralizes relayed output, and for any
+// later version. A value that is not a canonical decimal is not trusted.
 func TrustsReportedImages(schema string) bool {
 	v, err := strconv.Atoi(schema)
 	return err == nil && v >= 2 && strconv.Itoa(v) == schema

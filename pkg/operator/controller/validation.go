@@ -416,9 +416,13 @@ func (r *RolloutReconciler) bind(ctx context.Context, b *binding) (string, bool,
 			return "", false, err
 		}
 	}
-	validators, err := r.verifyValidators(ctx, summary.ValidatorImages)
-	if err != nil {
-		return "", false, err
+	// A failed run whose checks never created a validator Job names no
+	// validator image, and binds with none.
+	var validators []evidence.ValidatorImage
+	if len(summary.ValidatorImages) > 0 || summary.Passed() {
+		if validators, err = r.verifyValidators(ctx, summary.ValidatorImages); err != nil {
+			return "", false, err
+		}
 	}
 	predicate, err := r.predicate(ctx, b, validators)
 	if err != nil {
@@ -474,7 +478,7 @@ func (r *RolloutReconciler) signer(ctx context.Context, repo registry.Repository
 // the binding records are the ones that ran: AICR v1.0.x records tags only.
 func (r *RolloutReconciler) verifyValidators(ctx context.Context, named []evidence.ValidatorImage) ([]evidence.ValidatorImage, error) {
 	pins := r.Config.ValidatorPins()
-	named, err := r.toPinnedIndexDigests(ctx, named, pins)
+	named, err := evidence.ToPinnedIndexDigests(ctx, r.Registry, named, pins)
 	if err != nil {
 		return nil, err
 	}
@@ -500,41 +504,6 @@ func (r *RolloutReconciler) verifyValidators(ctx context.Context, named []eviden
 	}
 	sort.Slice(verified, func(i, j int) bool { return verified[i].Image < verified[j].Image })
 	return slices.CompactFunc(verified, func(a, b evidence.ValidatorImage) bool { return a == b }), nil
-}
-
-// toPinnedIndexDigests returns a copy of named in which each digest the
-// pinned image index lists as a platform manifest is replaced by the pinned
-// index digest. Entries with no pin or no digest, and digests the index does
-// not list, are unchanged. It returns an error if a pin's repository does not
-// parse or its index cannot be read.
-func (r *RolloutReconciler) toPinnedIndexDigests(ctx context.Context, named []evidence.ValidatorImage,
-	pins map[string]string) ([]evidence.ValidatorImage, error) {
-
-	out := slices.Clone(named)
-	listed := map[string][]string{}
-	for i, n := range out {
-		pin, ok := pins[evidence.Repository(n.Image)]
-		_, pinned, _ := strings.Cut(pin, "@")
-		if !ok || n.Digest == "" || n.Digest == pinned {
-			continue
-		}
-		manifests, seen := listed[pin]
-		if !seen {
-			repo, err := registry.ParseRepository(evidence.Repository(pin))
-			if err != nil {
-				return nil, err
-			}
-			// CRI-O records the node platform's manifest digest, not the index digest.
-			if manifests, err = r.Registry.IndexManifests(ctx, repo, pinned); err != nil {
-				return nil, err
-			}
-			listed[pin] = manifests
-		}
-		if slices.Contains(manifests, n.Digest) {
-			out[i].Digest = pinned
-		}
-	}
-	return out, nil
 }
 
 // predicate is what the operator binds AICR's evidence to.

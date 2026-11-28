@@ -364,7 +364,7 @@ func buildEnv(
 		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv || e.Name == defaults.EnvRunaiProjectNamespace {
 			continue
 		}
-		if e.Name == defaults.EnvServiceMetricsQueryURL {
+		if e.Name == defaults.EnvServiceMetricsQueryURL || e.Name == ResultNonceEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

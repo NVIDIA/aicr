@@ -32,7 +32,8 @@ import (
 
 // JobPlan contains all components needed to build a validator Job.
 // External controllers can use these components to build custom Jobs
-// or call RenderPlan() to get an AICR-identical Job.
+// or call RenderPlan() to get the Job AICR builds. The AICR deployer also
+// sets ResultNonceEnv, which no plan carries.
 type JobPlan struct {
 	// ValidatorName is the unique validator identifier
 	ValidatorName string
@@ -350,7 +351,8 @@ func BuildJobPlan(
 }
 
 // RenderPlan renders a complete Kubernetes Job from a JobPlan.
-// The returned Job spec matches exactly what the current deployer produces.
+// The returned Job spec matches what the current deployer produces, except
+// that the deployer also sets ResultNonceEnv, which no plan carries.
 func RenderPlan(plan JobPlan) *batchv1.Job {
 	// Build image pull secrets
 	imagePullSecrets := make([]corev1.LocalObjectReference, 0, len(plan.ImagePullSecrets))

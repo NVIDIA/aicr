@@ -15,13 +15,11 @@
 package validator
 
 import (
-	"bytes"
-	"encoding/json"
 	stderrors "errors"
-	"io"
 	"log/slog"
 	"testing"
 
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/validator/catalog"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -87,7 +85,7 @@ func TestRunPhaseLogsSkippedCount(t *testing.T) {
 		),
 	)
 
-	logs := captureSlog(t)
+	logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 	_, err := v.runPhase(
 		t.Context(),
 		refusingJobApplyClient(),
@@ -103,20 +101,20 @@ func TestRunPhaseLogsSkippedCount(t *testing.T) {
 	// validator.go:674 -- the count on the phase's closing summary. This is
 	// the site --no-cluster never reaches, so nothing else in the suite
 	// covers it.
-	completed := findLogRecord(t, logs.Bytes(), "phase completed")
-	assertLogInt(t, completed, "phase completed", "skipped", 3)
+	completed := loggingtest.FindRecord(t, logs.Bytes(), "phase completed")
+	loggingtest.WantIntAttr(t, completed, "skipped", 3)
 	// Pinned alongside so a mutant that redirects "skipped" at one of them
 	// has to disagree with the value it copies, not merely with 3.
-	assertLogInt(t, completed, "phase completed", "validators", 5)
-	assertLogInt(t, completed, "phase completed", "passed", 0)
-	assertLogInt(t, completed, "phase completed", "failed", 0)
+	loggingtest.WantIntAttr(t, completed, "validators", 5)
+	loggingtest.WantIntAttr(t, completed, "passed", 0)
+	loggingtest.WantIntAttr(t, completed, "failed", 0)
 
 	// validator.go:531 -- the opening summary counts the skip LIST, not this
 	// phase's withheld checks, which is why 4 and not 3.
-	running := findLogRecord(t, logs.Bytes(), "running validation phase")
-	assertLogInt(t, running, "running validation phase", "skipped", 4)
-	assertLogInt(t, running, "running validation phase", "catalog", 5)
-	assertLogInt(t, running, "running validation phase", "selected", 2)
+	running := loggingtest.FindRecord(t, logs.Bytes(), "running validation phase")
+	loggingtest.WantIntAttr(t, running, "skipped", 4)
+	loggingtest.WantIntAttr(t, running, "catalog", 5)
+	loggingtest.WantIntAttr(t, running, "selected", 2)
 }
 
 // refusingJobApplyClient returns a fake clientset whose Job server-side-apply
@@ -130,59 +128,4 @@ func refusingJobApplyClient() *k8sfake.Clientset {
 		return true, nil, apierrors.NewInternalError(stderrors.New("fake clientset: Job apply refused"))
 	})
 	return cs
-}
-
-// captureSlog redirects the default logger into a buffer of JSON records for
-// the duration of the test. JSON rather than text so an attribute is read by
-// name and compared as a number, instead of substring-matching "skipped=3"
-// out of a line where several counts are printed side by side.
-func captureSlog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	buf := &bytes.Buffer{}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return buf
-}
-
-// findLogRecord returns the first captured record whose msg is want, failing
-// the test when no record carries it.
-func findLogRecord(t *testing.T, logs []byte, want string) map[string]any {
-	t.Helper()
-	dec := json.NewDecoder(bytes.NewReader(logs))
-	dec.UseNumber()
-	for {
-		var rec map[string]any
-		switch err := dec.Decode(&rec); {
-		case stderrors.Is(err, io.EOF):
-			t.Fatalf("no log record with msg %q; captured:\n%s", want, logs)
-		case err != nil:
-			t.Fatalf("decoding captured log: %v; captured:\n%s", err, logs)
-		}
-		if msg, ok := rec["msg"].(string); ok && msg == want {
-			return rec
-		}
-	}
-}
-
-// assertLogInt asserts the record carries key with exactly want. A missing
-// key is reported distinctly from a wrong value, so deleting an attribute and
-// mis-sourcing one are not confusable failures.
-func assertLogInt(t *testing.T, rec map[string]any, msg, key string, want int64) {
-	t.Helper()
-	raw, ok := rec[key]
-	if !ok {
-		t.Fatalf("%q record has no %q attribute; record = %v", msg, key, rec)
-	}
-	num, ok := raw.(json.Number)
-	if !ok {
-		t.Fatalf("%q record %q = %v (%T), want a number", msg, key, raw, raw)
-	}
-	got, err := num.Int64()
-	if err != nil {
-		t.Fatalf("%q record %q = %v, not an integer: %v", msg, key, raw, err)
-	}
-	if got != want {
-		t.Errorf("%q record %q = %d, want %d", msg, key, got, want)
-	}
 }

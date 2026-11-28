@@ -53,7 +53,13 @@ orchestrator reads, and only those markers may print them. A validator that
 prints another process's output should break every `##AICR-` in it. Validators
 built on `validators.Run` do this for everything written to `os.Stdout` and
 `os.Stderr`, turning it into `# #AICR-`. Writes that go to file descriptors 1
-and 2 directly, such as `println`, are not filtered.
+and 2 directly, such as `println`, are not filtered. Once the check function
+returns and the runner stops filtering, later writes to `os.Stdout` and
+`os.Stderr`, such as from a goroutine the check left running, are dropped.
+Every validator Job also gets a random `AICR_RESULT_NONCE`, which
+`validators.Run` unsets before the check runs. A validator not built on
+`validators.Run` must keep it from the processes it starts, or their relayed
+output can carry a result stamp the orchestrator trusts.
 
 ### Step 2: Build and Push the Image
 

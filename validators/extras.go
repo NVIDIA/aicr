@@ -60,8 +60,10 @@ func EmitRuntimeProvenance(p *ctrf.RuntimeProvenance) error {
 // EmitImage writes img to stdout as one ctrf.ImageLinePrefix line, which the
 // orchestrator appends to ctrf.TestResult.Images when img passes
 // ctrf.PodImage.Valid, fits under defaults.ValidatorMaxImageRecords, and the
-// result's resultSchema stamp passes ctrf.TrustsReportedImages. Call it once
-// for each pod the validator launched whose image produced the check's result.
+// result's resultSchema stamp passes ctrf.TrustsReportedImages and carries the
+// Job's result nonce. A log rotated past that stamp records no image. Call it
+// once for each pod the validator launched whose image produced the check's
+// result.
 func EmitImage(img ctrf.PodImage) error {
 	return emitSentinel(ctrf.ImageLinePrefix, img, false, "image")
 }

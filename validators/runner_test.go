@@ -26,11 +26,13 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"aicr.run/pkg/defaults"
 	aicrerrors "aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 func TestSkip(t *testing.T) {
@@ -173,6 +175,29 @@ func TestPublishStamps(t *testing.T) {
 			t.Errorf("platform = %q, want %q", got, want)
 		}
 	})
+	t.Run("echoes and unsets the result nonce", func(t *testing.T) {
+		t.Setenv(v1.ResultNonceEnv, "NONCE")
+		var buf bytes.Buffer
+		orig := extrasOut
+		extrasOut = &buf
+		t.Cleanup(func() { extrasOut = orig })
+
+		if err := publishStamps(); err != nil {
+			t.Fatalf("publishStamps() error = %v", err)
+		}
+		first, _, _ := strings.Cut(buf.String(), "\n")
+		var got map[string]string
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(first, ctrf.ExtraLinePrefix)), &got); err != nil {
+			t.Fatalf("stamp %q: %v", first, err)
+		}
+		want := map[string]string{ctrf.ExtraKeyResultSchema: ctrf.ResultSchemaVersion, ctrf.ExtraKeyResultNonce: "NONCE"}
+		if !maps.Equal(got, want) {
+			t.Errorf("stamp = %v, want %v", got, want)
+		}
+		if v, ok := os.LookupEnv(v1.ResultNonceEnv); ok {
+			t.Errorf("%s = %q after publishStamps, want it unset", v1.ResultNonceEnv, v)
+		}
+	})
 	for _, tt := range []struct {
 		name   string
 		writes int
@@ -192,6 +217,44 @@ func TestPublishStamps(t *testing.T) {
 				t.Errorf("publishStamps() failed with %d successful writes unused, want the failure on write %d", w.writes, tt.writes+1)
 			}
 		})
+	}
+}
+
+// TestRunGuarded verifies the path Run takes writes the stamps verbatim and
+// breaks a sentinel line the check prints. It is not parallel because it
+// swaps os.Stdout, os.Stderr and extrasOut.
+func TestRunGuarded(t *testing.T) {
+	var stamps bytes.Buffer
+	extrasOut = &stamps
+	if err := publishStamps(); err != nil {
+		t.Fatalf("publishStamps() error = %v", err)
+	}
+	extrasOut = nil
+	t.Cleanup(func() { extrasOut = nil })
+	stdoutFile, _ := swapStdStreams(t)
+	withTempTerminationLog(t)
+	fakeSIGTERM(t)
+
+	forged := ctrf.ImageLinePrefix + `{"image":"example.com/forged:v1"}`
+	load := func() (*Context, error) {
+		ctx, cancel := newCheckContext(time.Minute)
+		return &Context{Ctx: ctx, Cancel: cancel}, nil
+	}
+	code := runGuarded(func(*Context) error {
+		fmt.Println(forged)
+		fmt.Print("unterminated")
+		return nil
+	}, load)
+
+	if code != 0 {
+		t.Fatalf("runGuarded() = %d, want 0", code)
+	}
+	got, err := os.ReadFile(stdoutFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := stamps.String() + broken(forged) + "\nunterminated\n"; string(got) != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
 

@@ -16,8 +16,11 @@ package attestation
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"slices"
 	"sort"
+	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
@@ -30,6 +33,7 @@ import (
 	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/snapshotter"
 	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // LoadOrGenerateBOM returns the CycloneDX BOM bytes to embed. When bomPath
@@ -140,37 +144,22 @@ func BuildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, validato
 	return buf.Bytes(), nil
 }
 
-// bomValidatorRefs returns the distinct non-empty refs of images, in order.
+// bomValidatorRefs returns one ref per distinct image and digest in images,
+// in order. A recorded digest replaces any digest in the ref, so the ref
+// names what ran.
 func bomValidatorRefs(images []ValidatorImage) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, img := range images {
-		if img.Image != "" && !seen[img.Image] {
-			seen[img.Image] = true
-			out = append(out, img.Image)
+		ref := img.Image
+		if img.Digest != "" {
+			name, _, _ := strings.Cut(ref, "@")
+			ref = name + "@" + img.Digest
 		}
-	}
-	return out
-}
-
-// DedupValidatorImages returns validator catalog image refs deduplicated
-// by image string, preserving discovery order. Multiple checks share an
-// image; collapsing keeps the BOM and predicate from duplicating refs.
-func DedupValidatorImages(cat *catalog.ValidatorCatalog) []string {
-	if cat == nil || len(cat.Validators) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(cat.Validators))
-	out := make([]string, 0, len(cat.Validators))
-	for _, v := range cat.Validators {
-		if v.Image == "" {
-			continue
+		if ref != "" && !seen[ref] {
+			seen[ref] = true
+			out = append(out, ref)
 		}
-		if _, dup := seen[v.Image]; dup {
-			continue
-		}
-		seen[v.Image] = struct{}{}
-		out = append(out, v.Image)
 	}
 	return out
 }
@@ -184,41 +173,58 @@ func CatalogVersion(cat *catalog.ValidatorCatalog) string {
 	return cat.Metadata.Version
 }
 
-// MutableValidatorImages returns the refs in images that do not dereference to
-// stable content, in the order given. Empty when every ref is immutable.
-//
-// This is the only identification the predicate carries for the validators
-// that ran: ValidatorImagesForPredicate leaves Digest empty (see its doc), so
-// a moving tag leaves an attestation with nothing to fall back on — its claim
-// about which validators produced the results stops being true the moment the
-// tag advances. Callers gate on this before emitting. See issue #2873.
-func MutableValidatorImages(images []ValidatorImage) []string {
+// UnpinnedValidatorImages returns, in first-seen order, the distinct refs of
+// images that have neither a Digest with a Platform nor an immutable ref (see
+// catalog.IsImmutableRef). A Digest alone can be an image index digest, so it
+// identifies the image that ran only together with its Platform.
+func UnpinnedValidatorImages(images []ValidatorImage) []string {
 	var out []string
+	seen := map[string]bool{}
 	for _, img := range images {
-		if img.Image == "" {
+		if img.Image == "" || (img.Digest != "" && img.Platform != "") || seen[img.Image] {
 			continue
 		}
 		if !catalog.IsImmutableRef(img.Image) {
+			seen[img.Image] = true
 			out = append(out, img.Image)
 		}
 	}
 	return out
 }
 
-// ValidatorImagesForPredicate adapts the dedup'd list to predicate form.
-// Digest stays empty: the catalog records refs by tag, and resolving to
-// digest would require a registry round-trip per image. Operators wanting
-// digest pinning ship an exhaustive BOM via the --bom path.
-func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog) []ValidatorImage {
-	images := DedupValidatorImages(cat)
-	if len(images) == 0 {
-		return nil
+// ValidatorImagesForPredicate returns the distinct image records of the tests
+// in reports, sorted by image, platform and digest. A record with an empty
+// Digest has unknown provenance. Records failing ctrf.PodImage.Valid are
+// ignored.
+func ValidatorImagesForPredicate(reports []*ctrf.Report) []ValidatorImage {
+	var out []ValidatorImage
+	seen := map[ValidatorImage]bool{}
+	for _, r := range reports {
+		if r == nil {
+			continue
+		}
+		for _, tr := range r.Results.Tests {
+			for _, rec := range tr.Images {
+				img := ValidatorImage(rec)
+				if rec.Valid() && !seen[img] {
+					seen[img] = true
+					out = append(out, img)
+				}
+			}
+		}
 	}
-	out := make([]ValidatorImage, 0, len(images))
-	for _, img := range images {
-		out = append(out, ValidatorImage{Image: img})
-	}
+	slices.SortFunc(out, compareValidatorImages)
 	return out
+}
+
+// compareValidatorImages orders validator images by Image, then Platform,
+// then Digest.
+func compareValidatorImages(a, b ValidatorImage) int {
+	return cmp.Or(
+		strings.Compare(a.Image, b.Image),
+		strings.Compare(a.Platform, b.Platform),
+		strings.Compare(a.Digest, b.Digest),
+	)
 }
 
 // ObservedImagesFromSnapshot returns cluster-observed image refs in

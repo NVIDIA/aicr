@@ -1120,22 +1120,24 @@ func validateEvidenceFlags() []cli.Flag {
 			// would silently disable the gate for every later run in that shell
 			// or CI job — the same "applied from habit" failure AICR_VALIDATOR_IMAGE_TAG
 			// caused in #2873. Opting out must be argued per invocation.
-			Usage: `Emit the attestation even when a validator image resolves to a mutable tag.
-	Emission otherwise fails closed: the predicate identifies the validators that ran by tag alone, so a moving
-	tag (:edge, :latest) leaves the attestation naming a reference that can later resolve to different validator
-	code. Immutable tags are :vX.Y.Z, :sha-<commit>, :uat-<run-id>, and digest-pinned refs.
-	The usual cause is a stale AICR_VALIDATOR_IMAGE_TAG override — unset it before a conformance run rather than
-	reaching for this flag. Reserve the flag for disposable evidence (a local demo, a side-loaded smoke lane).
-	There is no environment-variable or config-file equivalent: the opt-out must be passed per invocation.`,
+			Usage: `Emit the attestation even when a validator image has a mutable tag and lacks a recorded digest or platform.
+	Emission otherwise fails closed, because a moving tag (:edge, :latest) can later resolve to different validator
+	code. An image a check ran is pinned by the digest its pod reported and the platform it printed, when both
+	were recorded. Others need a digest-pinned ref, or an immutable tag (:vX.Y.Z, :sha-<commit>, :uat-<run-id>) on
+	an image under ghcr.io/nvidia/aicr-validators/. The usual cause is a stale AICR_VALIDATOR_IMAGE_TAG override. Unset it before a
+	conformance run rather than reaching for this flag. Reserve the flag for disposable evidence (a local demo, a
+	side-loaded smoke lane). There is no environment-variable or config-file equivalent, so the opt-out must be
+	passed per invocation.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
 			Name: "bom",
 			Usage: `Path to a CycloneDX BOM (bom.cdx.json) to embed in the evidence bundle.
-	Optional with --emit-attestation: when omitted, aicr synthesizes a
-	recipe-bound BOM from the recipe's component refs + the validator
-	catalog images that ran. Pass an explicit path for an exhaustive
-	BOM (e.g., produced by 'make bom').`,
+	Optional with --emit-attestation. When omitted, aicr synthesizes a
+	recipe-bound BOM from the recipe's component refs, the recorded
+	validator images (each at its recorded digest if it has one), and the
+	cluster images observed in the snapshot. Pass an
+	explicit path for an exhaustive BOM (e.g., produced by 'make bom').`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{

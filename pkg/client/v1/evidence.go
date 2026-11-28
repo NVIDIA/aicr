@@ -50,8 +50,9 @@ type EvidenceOptions struct {
 	OutDir string
 
 	// BOMPath optionally embeds a CycloneDX BOM; when empty a recipe-bound
-	// BOM is synthesized from the recipe's component refs and the validator
-	// catalog images that ran.
+	// BOM is synthesized from the recipe's component refs, the validator
+	// images the phase results recorded, and the cluster images observed in
+	// the snapshot.
 	BOMPath string
 
 	// Push, when set, is the OCI reference to push the (optionally signed)
@@ -71,15 +72,17 @@ type EvidenceOptions struct {
 	// payloads instead of the redacted defaults).
 	Full bool
 
-	// AllowMutableValidatorTags emits even when a validator image resolves to
-	// a moving tag (`:edge`, `:latest`, anything not a release, `:sha-<commit>`
-	// or `:uat-<run_id>` ref). Emission otherwise fails closed, because the
-	// predicate identifies validators by tag alone. See #2873.
+	// AllowMutableValidatorTags permits emission when a validator image
+	// lacks a recorded digest or platform and has a moving tag (`:edge`,
+	// `:latest`, anything not a release, `:sha-<commit>` or `:uat-<run_id>`
+	// ref). Only an image under ghcr.io/nvidia/aicr-validators/ counts those
+	// tags as immutable. Any other image needs a digest-pinned ref. Emission
+	// otherwise fails closed, because the attestation would name that image
+	// by a tag that can move.
 	AllowMutableValidatorTags bool
 
-	// Commit is the build commit. It resolves the validator catalog for the
-	// bundle's BOM and is stamped into the predicate as AICRCommit. The
-	// Client has no commit of its own, so it is supplied per call.
+	// Commit is the build commit, stamped into the predicate as AICRCommit.
+	// The Client has no commit of its own, so it is supplied per call.
 	Commit string
 
 	// OIDCResolve selects KMS signing (SigningKey) or keyless signing and

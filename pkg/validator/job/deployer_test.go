@@ -235,12 +235,22 @@ func TestDeployJobResources(t *testing.T) {
 
 func TestDeployJobEnvVars(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
+	job := deployAndGet(t, d)
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	envMap := make(map[string]corev1.EnvVar)
 	for _, e := range env {
 		envMap[e.Name] = e
+	}
+
+	if nonce := envMap[v1.ResultNonceEnv].Value; nonce == "" || nonce != d.resultNonce {
+		t.Errorf("%s = %q, want the deployer's result nonce %q", v1.ResultNonceEnv, nonce, d.resultNonce)
+	}
+	other := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()})
+	deployAndGet(t, other)
+	if other.resultNonce == d.resultNonce {
+		t.Errorf("two Jobs share the result nonce %q", d.resultNonce)
 	}
 
 	if envMap["AICR_SNAPSHOT_PATH"].Value != "/data/snapshot/snapshot.yaml" {

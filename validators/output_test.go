@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/validator/ctrf"
 )
 
@@ -168,14 +169,21 @@ func TestGuardOutput(t *testing.T) {
 	fmt.Println("probe output")
 	fmt.Println(relayed)
 	fmt.Fprintln(os.Stderr, relayed)
+	fmt.Fprint(os.Stderr, "unterminated")
 	img := ctrf.PodImage{Image: "example.com/bench:v1"}
 	if emitErr := EmitImage(img); emitErr != nil {
 		t.Fatalf("EmitImage() error = %v", emitErr)
 	}
 	stop()
 
-	if os.Stdout != stdoutFile || os.Stderr != stderrFile || extrasOut != nil {
-		t.Error("stop did not restore os.Stdout, os.Stderr and extrasOut")
+	if extrasOut != nil {
+		t.Error("stop did not clear extrasOut")
+	}
+	if _, writeErr := fmt.Println(relayed); writeErr == nil {
+		t.Error("a stdout write after stop succeeded, want it dropped")
+	}
+	if _, writeErr := fmt.Fprintln(os.Stderr, relayed); writeErr == nil {
+		t.Error("a stderr write after stop succeeded, want it dropped")
 	}
 	stdout, err := os.ReadFile(stdoutFile.Name())
 	if err != nil {
@@ -200,17 +208,19 @@ func TestGuardOutput(t *testing.T) {
 			t.Errorf("stdout = %q, missing %q", stdout, want)
 		}
 	}
-	if got, want := string(stderr), broken(relayed)+"\n"; got != want {
+	if got, want := string(stderr), broken(relayed)+"\nunterminated\n"; got != want {
 		t.Errorf("stderr = %q, want %q", got, want)
 	}
 }
 
 // TestGuardOutputBoundsDrain verifies stop returns when a copy of a pipe's
-// write end, as a child process would inherit, outlives the check, and still
-// writes the partial line it read. It is not parallel because it swaps
-// os.Stdout and os.Stderr.
+// write end, as a child process would inherit, outlives the check, warns
+// that it stopped waiting, and still writes the partial line it read. It is
+// not parallel because it swaps os.Stdout, os.Stderr and the default slog
+// logger.
 func TestGuardOutputBoundsDrain(t *testing.T) {
 	stdoutFile, _ := swapStdStreams(t)
+	logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 	stop, err := guardOutput(time.Second)
 	if err != nil {
 		t.Fatalf("guardOutput() error = %v", err)
@@ -251,6 +261,12 @@ func TestGuardOutputBoundsDrain(t *testing.T) {
 	}
 	if string(got) != "partial\n" {
 		t.Errorf("stdout = %q, want the held partial line with a newline added", got)
+	}
+	const warning = "check output still open after the check returned"
+	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(logs.String(), warning); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("logs = %q, want a %q warning", logs.String(), warning)
+		}
 	}
 }
 

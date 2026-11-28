@@ -132,8 +132,8 @@ type CheckResult struct {
 	// pass of a check known to be observation-only (v1.IsObservationOnlyCheck),
 	// whatever its result-contract stamp (extra.resultSchema) says: the stamp
 	// only decides whether Reason reports an image that predates the marker
-	// or a marker that went missing. Always false for a result that did not
-	// pass.
+	// or a log rotated past the stamp, or a marker that went missing. Always
+	// false for a result that did not pass.
 	ObservationOnly bool
 }
 

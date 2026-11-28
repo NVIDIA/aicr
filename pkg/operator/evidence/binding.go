@@ -21,12 +21,15 @@
 package evidence
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/registry"
 )
 
 // Statement and predicate identifiers.
@@ -57,10 +60,13 @@ type AICRSummary struct {
 	KeyFingerprint string
 }
 
-// ValidatorImage is a validator image and, when known, its digest.
+// ValidatorImage is a validator image and, when known, its digest and the
+// os/arch platform it ran as. AICR records one entry per platform, so two
+// entries can share an image and digest.
 type ValidatorImage struct {
-	Image  string `json:"image"`
-	Digest string `json:"digest,omitempty"`
+	Image    string `json:"image"`
+	Digest   string `json:"digest,omitempty"`
+	Platform string `json:"platform,omitempty"`
 }
 
 // PhaseResult counts a validation phase's checks. Other counts checks that
@@ -118,7 +124,8 @@ func (s *AICRSummary) Passed() bool {
 // pinned maps an image repository (no tag or digest) to its pinned
 // repository:tag@digest reference. Every validator AICR names must be
 // pinned, at the pinned tag, and at the pinned digest when AICR records one;
-// AICR v1.0.x records tags only, and refuses a mutable tag itself.
+// AICR v1.0.x records tags only. AICR refuses to attest a mutable tag unless
+// it recorded the image's digest and platform.
 func CheckValidators(named []ValidatorImage, pinned map[string]string) error {
 	if len(named) == 0 {
 		return operrors.New(operrors.ErrCodeInvalidRequest, "the evidence names no validator image")
@@ -144,6 +151,47 @@ func CheckValidators(named []ValidatorImage, pinned map[string]string) error {
 	}
 	sort.Strings(mismatched)
 	return operrors.New(operrors.ErrCodeInvalidRequest, "validator images differ from the pinned ones: "+strings.Join(mismatched, "; "))
+}
+
+// IndexLister lists the manifests an image index names.
+type IndexLister interface {
+	IndexManifests(ctx context.Context, r registry.Repository, digest string) ([]string, error)
+}
+
+// ToPinnedIndexDigests returns a copy of named in which each digest the
+// pinned image index lists as a platform manifest is replaced by the pinned
+// index digest, so CheckValidators compares it with the pin. pinned is as
+// for CheckValidators. Entries with no pin or no digest, and digests the
+// index does not list, are unchanged. It returns an error if a pin's
+// repository does not parse or its index cannot be read.
+func ToPinnedIndexDigests(ctx context.Context, indexes IndexLister, named []ValidatorImage,
+	pinned map[string]string) ([]ValidatorImage, error) {
+
+	out := slices.Clone(named)
+	listed := map[string][]string{}
+	for i, n := range out {
+		pin, ok := pinned[Repository(n.Image)]
+		_, pinDigest, _ := strings.Cut(pin, "@")
+		if !ok || n.Digest == "" || n.Digest == pinDigest {
+			continue
+		}
+		manifests, seen := listed[pin]
+		if !seen {
+			repo, err := registry.ParseRepository(Repository(pin))
+			if err != nil {
+				return nil, err
+			}
+			// CRI-O records the node platform's manifest digest, not the index digest.
+			if manifests, err = indexes.IndexManifests(ctx, repo, pinDigest); err != nil {
+				return nil, err
+			}
+			listed[pin] = manifests
+		}
+		if slices.Contains(manifests, n.Digest) {
+			out[i].Digest = pinDigest
+		}
+	}
+	return out, nil
 }
 
 func atDigest(d string) string {

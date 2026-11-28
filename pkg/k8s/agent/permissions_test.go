@@ -18,11 +18,13 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 
 	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/logging/loggingtest"
 
 	"aicr.run/pkg/errors/errorstest"
 	authv1 "k8s.io/api/authorization/v1"
@@ -462,7 +464,7 @@ func TestCheckPermissions_SubjectAccessReviewForbiddenReportsAndContinues(t *tes
 			stderrors.New(`User "snapshot-runner" cannot create resource "subjectaccessreviews"`))
 	})
 
-	logs := captureLogs(t)
+	logs := loggingtest.CaptureText(t, slog.LevelDebug)
 	d := NewDeployer(clientset, Config{
 		Namespace:          testNamespace,
 		ServiceAccountName: exactSAName,

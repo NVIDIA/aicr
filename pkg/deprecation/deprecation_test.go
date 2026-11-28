@@ -15,13 +15,14 @@
 package deprecation
 
 import (
-	"bytes"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"aicr.run/pkg/logging/loggingtest"
 )
 
 func TestNoticeMessage(t *testing.T) {
@@ -72,27 +73,12 @@ func TestNoticeMessage(t *testing.T) {
 	}
 }
 
-// captureLogs redirects slog for the duration of a test and returns the buffer.
-// slog's default logger is process-global, so these tests cannot run in
-// parallel with each other.
-func captureLogs(t *testing.T) *bytes.Buffer {
-	t.Helper()
-
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
-		Level: slog.LevelWarn,
-	})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return &buf
-}
-
 // TestRecorderWarnsOncePerSubject is the property that makes this usable from a
 // loader loop. Without it a catalog of 100 deprecated overlays emits 100
 // identical lines and the user learns nothing they did not know after the
 // first.
 func TestRecorderWarnsOncePerSubject(t *testing.T) {
-	buf := captureLogs(t)
+	buf := loggingtest.CaptureText(t, slog.LevelWarn)
 
 	var r Recorder
 	notice := Notice{Subject: "--legacy-flag", Replacement: "--new-flag", RemovedIn: "v0.25"}
@@ -113,7 +99,7 @@ func TestRecorderWarnsOncePerSubject(t *testing.T) {
 // stream can rely on. The message alone is prose; these are what a log
 // aggregator can alert on.
 func TestRecorderWarnEmitsStructuredContext(t *testing.T) {
-	buf := captureLogs(t)
+	buf := loggingtest.CaptureText(t, slog.LevelWarn)
 
 	var r Recorder
 	r.Warn(Notice{Subject: "/v1/recipe", Replacement: "/v2/recipe", RemovedIn: "v0.25"})
@@ -134,7 +120,7 @@ func TestRecorderWarnEmitsStructuredContext(t *testing.T) {
 // An unscheduled removal omits the removedIn attribute instead of emitting an
 // empty one, and an anchored notice points at its entry.
 func TestRecorderWarnUnscheduledAnchored(t *testing.T) {
-	buf := captureLogs(t)
+	buf := loggingtest.CaptureText(t, slog.LevelWarn)
 
 	var r Recorder
 	r.Warn(Notice{Subject: "--old", Replacement: "--new", Anchor: "old-entry"})
@@ -152,7 +138,7 @@ func TestRecorderWarnUnscheduledAnchored(t *testing.T) {
 // subject would collapse every unrelated notice into one bucket, silently
 // suppressing real warnings after the first.
 func TestRecorderIgnoresEmptySubject(t *testing.T) {
-	buf := captureLogs(t)
+	buf := loggingtest.CaptureText(t, slog.LevelWarn)
 
 	var r Recorder
 	r.Warn(Notice{RemovedIn: "v0.25"})
@@ -176,7 +162,7 @@ func TestRecorderIgnoresEmptySubject(t *testing.T) {
 }
 
 func TestRecorderWarnIsConcurrencySafe(t *testing.T) {
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelWarn)
 
 	var r Recorder
 	var wg sync.WaitGroup
@@ -295,7 +281,7 @@ func TestSetHTTPHeaders(t *testing.T) {
 // test uses — a collision would suppress the log line and the assertion would
 // fail for the wrong reason.
 func TestPackageWarn(t *testing.T) {
-	buf := captureLogs(t)
+	buf := loggingtest.CaptureText(t, slog.LevelWarn)
 
 	Warn(Notice{
 		Subject:     "TestPackageWarn-subject",

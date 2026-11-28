@@ -20,14 +20,25 @@ package v1
 // does for the other named checks.
 const ClusterAutoscalingCheckName = "cluster-autoscaling"
 
+// ResultNonceEnv names the validator container's environment variable that
+// holds the random nonce the orchestrator generates for each validator Job.
+// validators.Run echoes it in its result-contract stamp, as
+// ctrf.ExtraKeyResultNonce, and the orchestrator records a result's image and
+// platform lines only from logs whose stamp carries it. In a validator built
+// on validators.Run, relayed output cannot supply that stamp, and processes
+// the check starts do not inherit the nonce. Any other validator must keep the
+// nonce from the processes it starts.
+const ResultNonceEnv = "AICR_RESULT_NONCE"
+
 // observationOnlyChecks are the checks whose every passing result is an
 // observation (validators.ObservationOnlyExtra), never a demonstration. It is
 // the one list both ends of the result contract consult: the conformance
 // image's tests assert each name is a registered check that emits the marker,
 // and pkg/evidence/cncf reads every unmarked pass from one of them as an
 // observation regardless of the ctrf.ExtraKeyResultSchema stamp; the stamp
-// only decides whether the reason says the image predates the contract or
-// the marker went missing.
+// only decides whether the reason says the stamp is absent, because the
+// image predates the contract or the kubelet rotated the log past it, or the
+// marker went missing.
 var observationOnlyChecks = map[string]bool{
 	ClusterAutoscalingCheckName: true,
 }

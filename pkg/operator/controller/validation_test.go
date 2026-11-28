@@ -590,11 +590,17 @@ func TestValidationIgnoresOtherRuns(t *testing.T) {
 // is promoted and no evidence annotation is set.
 func TestValidationFailureFailsRollout(t *testing.T) {
 	for name, tc := range map[string]struct {
-		exit     int32
-		pushed   bool
-		evidence bool
+		exit       int32
+		pushed     bool
+		validators []string
+		evidence   bool
+		// rejected is in the message when the pushed evidence is rejected.
+		rejected string
 	}{
-		"checks failed":     {exit: aicrjob.ExitInternal, pushed: true, evidence: true},
+		"checks failed":                          {exit: aicrjob.ExitInternal, pushed: true, validators: []string{deploymentValidator}, evidence: true},
+		"checks failed before any validator ran": {exit: aicrjob.ExitInternal, pushed: true, evidence: true},
+		"checks failed naming an unpinned validator": {exit: aicrjob.ExitInternal, pushed: true,
+			validators: []string{deploymentValidator, "ghcr.io/nvidia/aicr-validators/performance:v1.0.0"}, rejected: "is not pinned"},
 		"pre-flight failed": {exit: aicrjob.ExitInvalidInput},
 		"unauthorized":      {exit: aicrjob.ExitUnauthorized},
 		"no exit":           {exit: -1},
@@ -605,7 +611,7 @@ func TestValidationFailureFailsRollout(t *testing.T) {
 			r, f := newValidating(t, newEngine(), true)
 			job := untilValidating(t, ctx, r)
 			if tc.pushed {
-				f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 3, deploymentValidator)
+				f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 3, tc.validators...)
 			}
 			fail(t, ctx, job, tc.exit)
 			reconcileRollout(t, ctx, r)
@@ -615,6 +621,11 @@ func TestValidationFailureFailsRollout(t *testing.T) {
 				!strings.Contains(ro.Status.Message, "deployment validation failed: ") {
 
 				t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
+			}
+			if rejected := strings.Contains(ro.Status.Message, "its evidence was rejected: "); rejected != (tc.rejected != "") ||
+				!strings.Contains(ro.Status.Message, tc.rejected) {
+
+				t.Fatalf("message = %q, want the evidence rejected: %t, naming %q", ro.Status.Message, tc.rejected != "", tc.rejected)
 			}
 			if tc.evidence && f.binding(t, ro.Status.Validation.Evidence).Predicate.Result != "Failed" {
 				t.Fatal("failed run bound as passed")
@@ -1220,6 +1231,7 @@ func TestValidationRejectsEvidence(t *testing.T) {
 		"moved tag":     {recipe: "h100", validators: []string{deploymentValidator}, moved: true, want: "not the pinned"},
 		"other recipe":  {recipe: "other", validators: []string{deploymentValidator}, want: "not the plan's h100"},
 		"failed checks": {recipe: "h100", failed: 1, validators: []string{deploymentValidator}, want: "records failed checks"},
+		"no validator":  {recipe: "h100", want: "names no validator image"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := testContext(t)

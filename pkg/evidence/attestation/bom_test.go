@@ -18,7 +18,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
+	"reflect"
+	"strings"
 	"testing"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -28,7 +29,9 @@ import (
 	"aicr.run/pkg/measurement"
 	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
 	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestCatalogVersion(t *testing.T) {
@@ -52,86 +55,18 @@ func TestCatalogVersion(t *testing.T) {
 	}
 }
 
-func TestDedupValidatorImages(t *testing.T) {
-	tests := []struct {
-		name string
-		cat  *catalog.ValidatorCatalog
-		want []string
-	}{
-		{"nil catalog", nil, nil},
-		{"no validators", &catalog.ValidatorCatalog{}, nil},
-		{
-			name: "dedupes by image preserving order",
-			cat: &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-				{Name: "a", Image: "ghcr.io/x/deployment:v1"},
-				{Name: "b", Image: "ghcr.io/x/deployment:v1"},
-				{Name: "c", Image: "ghcr.io/x/performance:v1"},
-				{Name: "d", Image: "ghcr.io/x/conformance:v1"},
-			}},
-			want: []string{
-				"ghcr.io/x/deployment:v1",
-				"ghcr.io/x/performance:v1",
-				"ghcr.io/x/conformance:v1",
-			},
-		},
-		{
-			name: "skips entries with empty image",
-			cat: &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-				{Name: "a", Image: ""},
-				{Name: "b", Image: "ghcr.io/x/deployment:v1"},
-			}},
-			want: []string{"ghcr.io/x/deployment:v1"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := DedupValidatorImages(tt.cat)
-			if len(got) != len(tt.want) {
-				t.Fatalf("len = %d, want %d (got=%v)", len(got), len(tt.want), got)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
-				}
-			}
-		})
-	}
-}
-
-func TestValidatorImagesForPredicate(t *testing.T) {
-	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "a", Image: "ghcr.io/x/deployment:v1"},
-		{Name: "b", Image: "ghcr.io/x/deployment:v1"},
-		{Name: "c", Image: "ghcr.io/x/performance:v1"},
-	}}
-	got := ValidatorImagesForPredicate(cat)
-	want := []ValidatorImage{
-		{Image: "ghcr.io/x/deployment:v1"},
-		{Image: "ghcr.io/x/performance:v1"},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("len = %d, want %d (got=%v)", len(got), len(want), got)
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
-		}
-	}
-
-	if ValidatorImagesForPredicate(nil) != nil {
-		t.Errorf("nil catalog should produce nil slice")
-	}
-}
-
-func TestBomValidatorRefs(t *testing.T) {
+func TestBOMValidatorRefs(t *testing.T) {
+	digA := "sha256:" + strings.Repeat("a", 64)
+	digB := "sha256:" + strings.Repeat("b", 64)
 	tests := []struct {
 		name   string
 		images []ValidatorImage
 		want   []string
 	}{
 		{"nil", nil, nil},
+		{"digest-less ref is kept as-is", []ValidatorImage{{Image: "ghcr.io/x/deployment:v1"}}, []string{"ghcr.io/x/deployment:v1"}},
 		{
-			name: "dedupes by image preserving order",
+			name: "dedupes by ref preserving order",
 			images: []ValidatorImage{
 				{Image: "ghcr.io/x/performance:v1"},
 				{Image: "ghcr.io/x/deployment:v1"},
@@ -139,12 +74,102 @@ func TestBomValidatorRefs(t *testing.T) {
 			},
 			want: []string{"ghcr.io/x/performance:v1", "ghcr.io/x/deployment:v1"},
 		},
-		{"skips empty image", []ValidatorImage{{}, {Image: "ghcr.io/x/deployment:v1"}}, []string{"ghcr.io/x/deployment:v1"}},
+		{
+			name: "recorded digests, one per digest in order",
+			images: []ValidatorImage{
+				{Image: "ghcr.io/x/deployment:edge"},
+				{Image: "ghcr.io/x/deployment:edge", Digest: digA, Platform: "linux/amd64"},
+				{Image: "ghcr.io/x/deployment:edge", Digest: digA, Platform: "linux/arm64"},
+				{Image: "ghcr.io/x/deployment:edge", Digest: digB, Platform: "linux/arm64"},
+			},
+			want: []string{
+				"ghcr.io/x/deployment:edge",
+				"ghcr.io/x/deployment:edge@" + digA,
+				"ghcr.io/x/deployment:edge@" + digB,
+			},
+		},
+		{
+			name:   "recorded digest replaces a pinned one",
+			images: []ValidatorImage{{Image: "ghcr.io/x/deployment:v1@" + digA, Digest: digB}},
+			want:   []string{"ghcr.io/x/deployment:v1@" + digB},
+		},
+		{"empty image is skipped", []ValidatorImage{{}, {Image: "ghcr.io/x/deployment:v1"}}, []string{"ghcr.io/x/deployment:v1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := bomValidatorRefs(tt.images); !slices.Equal(got, tt.want) {
+			if got := bomValidatorRefs(tt.images); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("bomValidatorRefs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidatorImagesForPredicate(t *testing.T) {
+	const (
+		deploy = "ghcr.io/x/deployment:edge"
+		aiperf = "nvcr.io/nvidia/aiperf-bench:1.0"
+	)
+	digA := "sha256:" + strings.Repeat("a", 64)
+	digB := "sha256:" + strings.Repeat("b", 64)
+	report := func(images ...[]ctrf.PodImage) *ctrf.Report {
+		return phaseWithImages(validator.PhaseDeployment, images...).Report
+	}
+	skipped := report([]ctrf.PodImage{{Image: deploy, Digest: digA}})
+	skipped.Results.Tests[0].Status = ctrf.StatusSkipped
+
+	tests := []struct {
+		name    string
+		reports []*ctrf.Report
+		want    []ValidatorImage
+	}{
+		{"no reports", nil, nil},
+		{"nil report is ignored", []*ctrf.Report{nil}, nil},
+		{"tests without records list nothing", []*ctrf.Report{report(nil, nil)}, nil},
+		{
+			name:    "record without a digest is listed",
+			reports: []*ctrf.Report{report([]ctrf.PodImage{{Image: deploy}})},
+			want:    []ValidatorImage{{Image: deploy}},
+		},
+		{
+			name: "repeated records dedupe and sort by platform and digest",
+			reports: []*ctrf.Report{report(
+				[]ctrf.PodImage{{Image: deploy, Digest: digB, Platform: "linux/arm64"}},
+				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+			)},
+			want: []ValidatorImage{
+				{Image: deploy, Digest: digA, Platform: "linux/amd64"},
+				{Image: deploy, Digest: digB, Platform: "linux/arm64"},
+			},
+		},
+		{
+			name: "record without a digest is kept beside a digested one",
+			reports: []*ctrf.Report{report(
+				[]ctrf.PodImage{{Image: deploy, Digest: digA}},
+				[]ctrf.PodImage{{Image: deploy}},
+			)},
+			want: []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA}},
+		},
+		{
+			name: "records across tests and reports merge sorted by image",
+			reports: []*ctrf.Report{
+				report([]ctrf.PodImage{{Image: deploy, Digest: digA}, {Image: aiperf, Digest: digB}}),
+				report([]ctrf.PodImage{{Image: aiperf, Digest: digB}}),
+			},
+			want: []ValidatorImage{{Image: deploy, Digest: digA}, {Image: aiperf, Digest: digB}},
+		},
+		{"skipped test's record is listed", []*ctrf.Report{skipped}, []ValidatorImage{{Image: deploy, Digest: digA}}},
+		{
+			name:    "invalid record is ignored",
+			reports: []*ctrf.Report{report([]ctrf.PodImage{{Image: deploy, Digest: "sha256:short"}, {Image: aiperf}})},
+			want:    []ValidatorImage{{Image: aiperf}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidatorImagesForPredicate(tt.reports)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ValidatorImagesForPredicate() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -320,7 +345,7 @@ func TestBuildAutoBOM_IncludesRecipeAndValidatorComponents(t *testing.T) {
 		},
 	}
 	images := []ValidatorImage{
-		{Image: "ghcr.io/x/deployment:latest"},
+		{Image: "ghcr.io/x/deployment:latest", Digest: "sha256:" + strings.Repeat("a", 64)},
 		{Image: "ghcr.io/x/performance:latest"},
 	}
 

@@ -16,6 +16,7 @@ package job
 
 import (
 	"context"
+	"crypto/rand"
 	stderrors "errors"
 	"fmt"
 	"log/slog"
@@ -100,6 +101,11 @@ type Deployer struct {
 	// deleting the pod on activeDeadlineSeconds expiry, when the pod can no
 	// longer be listed.
 	lastTerminated *corev1.Pod
+	// resultNonce is the v1.ResultNonceEnv value DeployJob gave the Job's
+	// validator container. Image and platform lines are recorded only from
+	// logs whose stamp carries it. Empty until DeployJob runs. While empty, no
+	// image or platform line is recorded.
+	resultNonce string
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -145,6 +151,8 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 
 	// Use the job name from the plan
 	d.jobName = plan.JobName
+	d.resultNonce = rand.Text()
+	plan.Env = append(plan.Env, corev1.EnvVar{Name: v1.ResultNonceEnv, Value: d.resultNonce})
 
 	// Best-effort: warn if any dependencyAffinity selector matches zero
 	// pods at deploy time. Catches silent label drift on dependency-chart

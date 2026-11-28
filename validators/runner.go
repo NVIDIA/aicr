@@ -27,6 +27,7 @@ import (
 	"aicr.run/pkg/defaults"
 	aicrerrors "aicr.run/pkg/errors"
 	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // terminationLogPath is the standard K8s termination message path.
@@ -78,9 +79,10 @@ type CheckFunc func(ctx *Context) error
 // occurrence of ctrf.ReservedLinePrefix. This package's sentinel writers
 // bypass it, and so does the default slog handler, whose text output quotes
 // any value that contains a newline. Writes straight to file descriptors 1
-// and 2 are not filtered. A process that exits before the check returns, such
-// as on a panic in a goroutine the check started, loses the output the filter
-// still holds.
+// and 2 are not filtered. Once the check returns and the runner stops the
+// filter, writes to os.Stdout and os.Stderr are dropped. A process that exits
+// before the check returns, such as on a panic in a goroutine the check
+// started, loses the output the filter still holds.
 //
 // Usage in main.go:
 //
@@ -107,30 +109,34 @@ func Run(checks map[string]CheckFunc) {
 	}
 
 	slog.Info("starting check", "name", checkName)
-
-	stopGuard, err := guardOutput(defaults.ValidatorOutputDrainTimeout)
-	if err != nil {
-		writeTerminationLog("failed to guard check output: %v", err)
-		os.Exit(1) //nolint:gocritic // Intentional exit before any deferred resources
-	}
-	exitCode := runCheck(checkFn)
-	stopGuard()
-	os.Exit(exitCode)
+	os.Exit(runGuarded(checkFn, LoadContext))
 }
 
-// runCheck publishes the result-contract and platform stamps, loads context,
-// runs the check, and returns the exit code. Separated from Run so defer
-// works correctly before os.Exit.
+// runGuarded runs checkFn with a Context from load, with the check's output
+// filtered by guardOutput, and returns the exit code.
+func runGuarded(checkFn CheckFunc, load func() (*Context, error)) int {
+	stop, err := guardOutput(defaults.ValidatorOutputDrainTimeout)
+	if err != nil {
+		writeTerminationLog("failed to guard check output: %v", err)
+		return 1
+	}
+	defer stop()
+	return runCheck(checkFn, load)
+}
+
+// runCheck publishes the result-contract and platform stamps, loads the
+// Context with load, runs the check, and returns the exit code. Separated
+// from Run so defer works correctly before os.Exit.
 //
 // The stamps go out before anything else in runCheck can fail or exit, so
 // every result carries them unless a stamp cannot be written, which fails
 // the check.
-func runCheck(checkFn CheckFunc) int {
+func runCheck(checkFn CheckFunc, load func() (*Context, error)) int {
 	if err := publishStamps(); err != nil {
 		writeTerminationLog("failed to publish result stamps: %v", err)
 		return 1
 	}
-	ctx, err := LoadContext()
+	ctx, err := load()
 	if err != nil {
 		writeTerminationLog("failed to load context: %v", err)
 		return 1
@@ -186,15 +192,25 @@ func handleTerminated(checkErr error) int {
 	return exitCodeTerminated
 }
 
-// publishStamps stamps ExtraKeyResultSchema on the result and writes the
-// binary's platform as one ctrf.PlatformLinePrefix line. The validator
-// Dockerfiles copy the binary built for the image's architecture, so the
-// binary's platform is the image's.
+// publishStamps stamps ExtraKeyResultSchema on the result, with the
+// v1.ResultNonceEnv value as ctrf.ExtraKeyResultNonce when it is set, and
+// writes the binary's platform as one ctrf.PlatformLinePrefix line. The
+// validator Dockerfiles copy the binary built for the image's architecture,
+// so the binary's platform is the image's. It unsets v1.ResultNonceEnv, so
+// processes the check starts do not inherit the nonce.
 //
 // Errors:
-//   - ErrCodeInternal when a sentinel line could not be written to stdout.
+//   - ErrCodeInternal when v1.ResultNonceEnv cannot be unset or a sentinel
+//     line could not be written to stdout.
 func publishStamps() error {
-	if err := EmitExtra(ResultSchemaExtra()); err != nil {
+	stamp := ResultSchemaExtra()
+	if nonce := os.Getenv(v1.ResultNonceEnv); nonce != "" {
+		stamp[ctrf.ExtraKeyResultNonce] = nonce
+	}
+	if err := os.Unsetenv(v1.ResultNonceEnv); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to unset the result nonce", err)
+	}
+	if err := EmitExtra(stamp); err != nil {
 		return err
 	}
 	return emitSentinel(ctrf.PlatformLinePrefix, runtime.GOOS+"/"+runtime.GOARCH, false, "platform")

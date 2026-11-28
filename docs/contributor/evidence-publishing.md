@@ -22,20 +22,17 @@ for a release build, `:sha-<commit>` for a `main`-tip build — and the override
 replaces it unconditionally, including over a release tag.
 
 That matters more here than in an ordinary validate run, because the predicate
-identifies the validators that ran by *tag alone*. Its
-`validatorImages[].digest` is deliberately empty, since resolving it would cost
-a registry round-trip per image. Each CTRF test that ran a validator Job records
-the validator image in `images`, but with a digest only when the container
-runtime reported one for that image's repository. A side-loaded image or an
-unreadable pod leaves no digest, so a moving tag can still leave the bundle with
-nothing that pins the validator code. Once `:edge` advances, the predicate's
-claim about which validator code produced its results is no longer true. This is
-not hypothetical. `:edge` has been observed moving to a commit with a breaking
-rename about 75 minutes after a run it was recorded in, and moving twice within
-a single working session ([#2873](https://github.com/NVIDIA/aicr/issues/2873)).
+identifies a validator image without a
+[recorded digest](#recorded-validator-digests) by *tag alone*, and one without
+a recorded platform by a digest that may name only its multi-arch index. Once `:edge`
+advances, the bundle's claim about that validator code is no longer true, and
+nothing in the bundle records that. This is not hypothetical. `:edge` has been
+observed moving to a commit with a breaking rename about 75 minutes after a
+run it was recorded in, and moving twice within a single working session
+([#2873](https://github.com/NVIDIA/aicr/issues/2873)).
 
 `aicr validate --emit-attestation` therefore **fails closed** on a mutable
-validator tag:
+validator tag that lacks a recorded digest or platform:
 
 ```text
 [INVALID_REQUEST] refusing to emit evidence naming validator images that are not
@@ -45,7 +42,9 @@ image tag can be repointed after the run, leaving the attestation unverifiable
 
 (One line in the terminal; wrapped here.)
 
-A reference qualifies two ways, and only two:
+An image whose run recorded its digest and platform passes on any tag (see
+[Recorded validator digests](#recorded-validator-digests)). Otherwise its
+reference qualifies two ways, and only two:
 
 1. **It is digest-pinned** (`name@sha256:…`), from any registry. A digest is
    self-verifying, so no promise about the publisher is needed.
@@ -76,7 +75,8 @@ crane digest ghcr.io/nvidia/aicr-validators/performance:sha-$(git rev-parse orig
 ```
 
 If it resolves, drop the override and re-run — that is all the correction
-takes. When you genuinely must publish with a moving tag, pass
+takes. When you genuinely must publish a moving tag whose digest or platform
+was not recorded, pass
 `--allow-mutable-validator-tags` and **say so in the PR body**, naming which
 tag and why no immutable one was available. A reviewer cannot otherwise tell a
 deliberate exception from an override left over from a previous command.
@@ -88,6 +88,50 @@ guard that can be switched off by an inherited variable is not a guard. (Go
 callers set `EvidenceOptions.AllowMutableValidatorTags` explicitly, which is
 the same deliberate per-call act — see the
 [Go library guide](../integrator/go-library.md#what-evidenceattestationoptions-does-and-does-not-carry).)
+
+### Recorded validator digests
+
+Each check records its validator image in the CTRF `images` field, with the
+registry digest from the pod's `containerStatuses[].imageID` and the `os/arch`
+the image's own process printed on its `##AICR-PLATFORM##` line. Only the
+inference performance check reports an image it launches, its `aiperf-bench`
+pod, with the `##AICR-IMAGE##` sentinel. See
+[Stdout sentinels](validator.md#stdout-sentinels).
+
+`validatorImages` lists each distinct image, digest and platform in the
+bundled CTRF reports, after redaction. The catalog supplies only
+`validatorCatalogVersion`.
+
+- A check records its validator image once its Job is created, even if it
+  skips itself in its pod.
+- A check skipped before its Job was created (`--no-cluster`,
+  `--skip-check`), or whose Job failed to deploy, records nothing.
+- Other pods a check launches, such as NCCL or conformance probe pods, are
+  never listed, so the mutable-tag check does not cover their images.
+- Cluster workload images from the snapshot are never listed.
+
+The digest is what the kubelet pulled, not what the tag resolves to now.
+containerd reports the multi-arch index digest. Other runtimes may report the
+node platform's manifest digest. Either way the digest identifies the image
+that ran only together with `platform`, so the mutable-tag check treats an
+entry as pinned only when it has both.
+
+A check whose pod could not be read, or whose image was side-loaded into kind,
+records no digest. A check records no platform when its output was not read,
+or its log lacks the stamp `validators.Run` writes with the Job's result nonce,
+without which the orchestrator ignores `##AICR-PLATFORM##` lines. That includes
+a custom `--data` validator not built on `validators.Run`, a validator image
+from a release that predates the nonce, and a log the kubelet rotated past the
+stamp. Each such image is listed even when another run recorded its digest and
+platform, so it still gets the mutable-tag check. Unset
+`AICR_VALIDATOR_IMAGE_TAG` so an immutable tag resolves, pin a catalog image by
+digest, or pass `--allow-mutable-validator-tags`. A launched image such as
+`aiperf-bench` is not a catalog entry, so only the first and last apply to it.
+
+A launched image is listed only from a result whose log holds that stamp.
+Without it the orchestrator drops every `##AICR-IMAGE##` line, so the image is
+missing from `validatorImages` and the BOM, and the mutable-tag check never
+sees it.
 
 ## The Fulcio connectivity problem
 

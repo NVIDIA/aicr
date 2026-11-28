@@ -16,6 +16,7 @@ package attestation
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,22 @@ func TestBuildPredicate_SortsValidatorImages(t *testing.T) {
 	})
 	if p.ValidatorImages[0].Image != "a-image" {
 		t.Errorf("expected a-image first, got %q", p.ValidatorImages[0].Image)
+	}
+
+	p = BuildPredicate(PredicateInputs{
+		ValidatorImages: []ValidatorImage{
+			{Image: "a-image", Digest: "sha256:bb", Platform: "linux/arm64"},
+			{Image: "a-image", Digest: "sha256:cc", Platform: "linux/amd64"},
+			{Image: "a-image", Digest: "sha256:aa", Platform: "linux/amd64"},
+		},
+	})
+	want := []ValidatorImage{
+		{Image: "a-image", Digest: "sha256:aa", Platform: "linux/amd64"},
+		{Image: "a-image", Digest: "sha256:cc", Platform: "linux/amd64"},
+		{Image: "a-image", Digest: "sha256:bb", Platform: "linux/arm64"},
+	}
+	if !reflect.DeepEqual(p.ValidatorImages, want) {
+		t.Errorf("same-image order = %+v, want %+v", p.ValidatorImages, want)
 	}
 }
 
