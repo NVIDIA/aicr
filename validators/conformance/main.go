@@ -51,5 +51,6 @@ func conformanceChecks() map[string]validators.CheckFunc {
 		"workload-sandboxing":       CheckWorkloadSandboxing,
 		"gpu-operator-health":       CheckGPUOperatorHealth,
 		"platform-health":           CheckPlatformHealth,
+		"dynamo-snapshot-restore":   CheckDynamoSnapshotRestore,
 	}
 }

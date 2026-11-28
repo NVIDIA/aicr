@@ -91,6 +91,7 @@ Neither constraint applies to `nccl-cre-all-reduce-bw`,
 | `workload-sandboxing` | Verify a sandboxed `RuntimeClass` (gVisor, Kata; or the one `AICR_SANDBOX_RUNTIME_CLASS` names) isolates a CPU-only `ubuntu:22.04` probe pod from the host: no host daemon in `/proc`, no readable `/dev/mem` or `/dev/kmem`, no `/etc/kubernetes`, `/var/lib/kubelet` or `/var/log/pods`, no host bridge interface, and a kernel identity distinct from an unsandboxed control pod on the same node; fails with `unmet prerequisite: no sandboxed RuntimeClass` when none exists (never skips) | 10m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
+| `dynamo-snapshot-restore` | Verify Snapshot through Dynamo: a `DynamoGraphDeployment` with checkpointing has its vLLM worker captured, the worker restores from the checkpoint, and the frontend answers a chat completion (skipped unless the recipe declares `snapshot` and `dynamo-platform`) | 35m |
 
  `slinky-slurm-health` expects a GPU-requesting NodeSet and fails
 if none is present; for `kind` or CPU-only recipes it runs CPU-only checks and
