@@ -1,0 +1,334 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kubeflow MPI Operator v2 (the kubeflow.org/v2beta1 MPIJob controller), as a
+# vendored manifest-only component: upstream ships a single manifest and
+# Kustomize bases, with no chart. Taken from github.com/kubeflow/mpi-operator
+# tag v0.8.2 (commit fd6ab218ce3e49b81b6a411614d09c9deb029ae9),
+#
+#   deploy/v2beta1/mpi-operator.yaml
+#
+# the file Run:ai 3.0's installer applies at the same tag (MPIOperator v0.8.2
+# in its compatibility matrix; the support matrix lists 0.6.0 to 0.8.2). The
+# CRD in that file is kubeflow.org_mpijobs.yaml in this directory. Differences
+# from upstream in this file:
+#
+#   - the Namespace object is dropped: every deployer creates the release
+#     namespace itself.
+#   - namespaced objects, the ClusterRoleBinding subject and --lock-namespace
+#     use the release namespace, which the registry pins to mpi-operator: the
+#     Run:ai operator reads the Deployment mpi-operator/mpi-operator to decide
+#     whether MPI workloads can be suspended (MpiOperatorNamespace and
+#     MpiOperatorDeploymentName in runai-cluster 3.0.26's go-operator consts)
+#     and scrapes pods labeled app: mpi-operator in that namespace, so
+#     neither the names nor the label may change.
+#   - the image names its registry (docker.io, which upstream leaves
+#     implied and a runtime without a default search registry rejects) and
+#     carries its digest, the multi-arch index for amd64, arm64 and ppc64le;
+#     the pod takes the system node placement from values.
+#   - the container passes --monitoring-port=8081. Upstream leaves the flag at
+#     0, which serves no metrics, while the Run:ai operator always creates a
+#     PodMonitor that scrapes this pod on 8081 (RunaiConfig
+#     spec.mpi-operator.monitorPortNumber, default 8081); without the flag
+#     that target is down for as long as the operator runs. The container
+#     declares no ports, as upstream: the PodMonitor rewrites the scrape
+#     address only when it has no port, so a declared containerPort would
+#     send the scrape there instead.
+#   - the container requests CPU and memory, so the pod is not BestEffort and
+#     first in line for eviction: while it is down no MPIJob is reconciled,
+#     suspended or resumed.
+#   - the mpi-operator ClusterRole also grants update on batch jobs/status.
+#     From v0.8.0 the controller clears the launcher Job's status.startTime
+#     when it resumes a suspended MPIJob, and the ClusterRole upstream ships
+#     at v0.8.0 and v0.8.2 does not allow it: the update is refused, the
+#     launcher Job stays suspended and the job never resumes (seen on GKE,
+#     2026-11-25; under gang scheduling the workers then wait for the
+#     launcher forever). Upstream added this rule on master after v0.8.2
+#     (manifests/base/cluster-role.yaml at 4d63e86); it is the same rule.
+#     Drop the comment once a release carries it; keep the rule either way
+#     (TestMPIOperatorCanResumeSuspendedJobs).
+#
+# Nothing here conflicts with kubeflow-training-operator: that component
+# passes --enable-scheme for every scheme except mpijob and does not ship
+# Training Operator v1's mpijobs.kubeflow.org, which is the conflict Run:ai's
+# prerequisites page describes. The operator has no admission webhook and no
+# Service, so cert-manager is not a dependency.
+{{- $vals := index .Values "mpi-operator" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+  name: mpi-operator
+  namespace: {{ .Release.Namespace }}
+---
+aggregationRule:
+  clusterRoleSelectors:
+  - matchLabels:
+      rbac.authorization.kubeflow.org/aggregate-to-kubeflow-mpijobs-admin: "true"
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-admin: "true"
+  name: kubeflow-mpijobs-admin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-edit: "true"
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-mpijobs-admin: "true"
+  name: kubeflow-mpijobs-edit
+rules:
+- apiGroups:
+  - kubeflow.org
+  resources:
+  - mpijobs
+  - mpijobs/status
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+    rbac.authorization.kubeflow.org/aggregate-to-kubeflow-view: "true"
+  name: kubeflow-mpijobs-view
+rules:
+- apiGroups:
+  - kubeflow.org
+  resources:
+  - mpijobs
+  - mpijobs/status
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+  name: mpi-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  - services
+  verbs:
+  - create
+  - list
+  - watch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - delete
+  - update
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  verbs:
+  - create
+  - get
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - list
+  - update
+  - watch
+# Not in upstream v0.8.2; see the header. Without it a suspended MPIJob never
+# resumes.
+- apiGroups:
+  - batch
+  resources:
+  - jobs/status
+  verbs:
+  - update
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - create
+  - get
+- apiGroups:
+  - kubeflow.org
+  resources:
+  - mpijobs
+  - mpijobs/finalizers
+  - mpijobs/status
+  verbs:
+  - '*'
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - '*'
+- apiGroups:
+  - scheduling.incubator.k8s.io
+  - scheduling.sigs.dev
+  - scheduling.volcano.sh
+  resources:
+  - queues
+  - podgroups
+  verbs:
+  - '*'
+- apiGroups:
+  - scheduling.x-k8s.io
+  resources:
+  - podgroups
+  verbs:
+  - '*'
+- apiGroups:
+  - scheduling.k8s.io
+  resources:
+  - priorityclasses
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+  name: mpi-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mpi-operator
+subjects:
+- kind: ServiceAccount
+  name: mpi-operator
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: mpi-operator
+    app.kubernetes.io/component: mpijob
+    app.kubernetes.io/name: mpi-operator
+    kustomize.component: mpi-operator
+  name: mpi-operator
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mpi-operator
+      app.kubernetes.io/component: mpijob
+      app.kubernetes.io/name: mpi-operator
+      kustomize.component: mpi-operator
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+      labels:
+        app: mpi-operator
+        app.kubernetes.io/component: mpijob
+        app.kubernetes.io/name: mpi-operator
+        kustomize.component: mpi-operator
+    spec:
+      {{- if $vals.systemNodeSelector }}
+      nodeSelector:
+        {{- toYaml $vals.systemNodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if $vals.systemTolerations }}
+      tolerations:
+        {{- toYaml $vals.systemTolerations | nindent 8 }}
+      {{- end }}
+      containers:
+      - args:
+        - -alsologtostderr
+        - --lock-namespace={{ .Release.Namespace }}
+        - --monitoring-port=8081
+        # Literal, not templated from values: tools/bom and aicr mirror read
+        # embedded manifests without rendering them. The Run:ai operator
+        # takes the text after this reference's last colon as the MPI
+        # Operator's version and allows suspend from 0.4 up. With the digest
+        # there, that text is the digest's hex, which passes only because it
+        # reads as a number followed by letters (2740913, then e1802...); a
+        # digest whose hex starts with a letter, or whose leading digits are
+        # all zeros, would report suspend unavailable, and Run:ai has no
+        # tag-to-version map for this operator to correct it.
+        # TestMPIOperatorImageReadableByRunai holds a re-vendor to that.
+        image: docker.io/mpioperator/mpi-operator:0.8.2@sha256:2740913e1802cbd24c9b16e143fbbfa99f0049e6d2946c8015bfd87c45ba6caa
+        name: mpi-operator
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: mpi-operator

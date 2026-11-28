@@ -180,7 +180,8 @@ func TestDeploymentOrderGuards(t *testing.T) {
 		// the component and the preflight mixin's edge still resolves.
 		// runai-cluster's own edges order it after the GPU and monitoring
 		// stack its operator checks in DependenciesFulfilled, and after the
-		// Kubeflow Training Operator v1 it looks up by name (#3302, Phase 1.3).
+		// Kubeflow Training Operator v1 and MPI Operator v2 it looks up by
+		// name (#3302, Phase 1.3 and Phase 3).
 		{
 			name: "h100-eks-ubuntu-training-runai",
 			criteria: func() *Criteria {
@@ -193,13 +194,14 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"runai-cluster": {"gpu-operator", "kube-prometheus-stack", "prometheus-operator-crds", "cert-manager", "kubeflow-training-operator"},
+				"runai-cluster": {"gpu-operator", "kube-prometheus-stack", "prometheus-operator-crds", "cert-manager", "kubeflow-training-operator", "mpi-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "runai-cluster"},
 				{"kube-prometheus-stack", "runai-cluster"},
 				{"cert-manager", "runai-cluster"},
 				{"kubeflow-training-operator", "runai-cluster"},
+				{"mpi-operator", "runai-cluster"},
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
@@ -215,13 +217,14 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"runai-cluster": {"gpu-operator", "kube-prometheus-stack", "prometheus-operator-crds", "cert-manager", "kubeflow-training-operator"},
+				"runai-cluster": {"gpu-operator", "kube-prometheus-stack", "prometheus-operator-crds", "cert-manager", "kubeflow-training-operator", "mpi-operator"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "runai-cluster"},
 				{"kube-prometheus-stack", "runai-cluster"},
 				{"cert-manager", "runai-cluster"},
 				{"kubeflow-training-operator", "runai-cluster"},
+				{"mpi-operator", "runai-cluster"},
 				{"gpu-operator", "nvsentinel"},
 			},
 		},

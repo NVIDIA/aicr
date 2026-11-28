@@ -652,6 +652,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
 | `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
 | `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
+| `mpi-operator` | Kubeflow MPI Operator v2 (`kubeflow.org/v2beta1` MPIJob) for the Run:ai leaves |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
 | `network-operator-ocp` | Network Operator variant for OpenShift (OCP) |
 | `network-operator-ocp-olm` | Network Operator for OpenShift via Operator Lifecycle Manager (OLM) |
