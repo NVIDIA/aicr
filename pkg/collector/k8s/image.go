@@ -34,14 +34,17 @@ import (
 // fragile magic literal.
 const SubtypeImage = "image"
 
-// collectContainerImages extracts unique container images from all pods.
+// collectContainerImages returns the legacy image summary and per-container
+// workload observations from a paginated Pod scan. A non-transient failure
+// after an earlier page returns usable partial observations alongside an error
+// and no legacy summary. Callers must retain those observations.
 //
-// Pods are listed via paginated API calls (see defaults.K8sPodListPageSize)
-// to bound peak memory on large clusters. Iteration honors ctx cancellation
-// between pages and within each page's pod loop.
-func (k *Collector) collectContainerImages(ctx context.Context) (map[string]measurement.Reading, error) {
+// Pagination bounds peak memory. The scan checks cancellation between pages
+// and while processing Pods.
+func (k *Collector) collectContainerImages(ctx context.Context) (map[string]measurement.Reading, workloadImageObservations, error) {
 	// Track unique images (map of image name to version)
 	imageVersions := make(map[string]string)
+	observations := workloadImageObservations{bytes: 2} // JSON array delimiters.
 	recordImage := func(imageRef string) {
 		if imageRef == "" {
 			return
@@ -61,7 +64,7 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 	podCount := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
+			return nil, workloadImageObservations{}, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
 		}
 
 		podList, err := k.ClientSet.CoreV1().Pods("").List(ctx, v1.ListOptions{
@@ -69,18 +72,28 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 			Continue: continueToken,
 		})
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list pods", err)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, workloadImageObservations{}, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", ctxErr)
+			}
+			if errors.IsTransient(err) {
+				return nil, workloadImageObservations{}, errors.Wrap(errors.ErrCodeTimeout, "pod list interrupted", err)
+			}
+			if pageCount > 0 {
+				observations.coverage = "partial"
+			}
+			return nil, observations, errors.Wrap(errors.ErrCodeInternal, "failed to list pods", err)
 		}
 		pageCount++
 
 		for i := range podList.Items {
 			// Check for context cancellation
 			if err := ctx.Err(); err != nil {
-				return nil, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
+				return nil, workloadImageObservations{}, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
 			}
 
 			pod := &podList.Items[i]
 			podCount++
+			observations.recordPod(pod)
 
 			for _, container := range pod.Spec.Containers {
 				recordImage(container.Image)
@@ -99,6 +112,10 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, workloadImageObservations{}, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
+	}
+
 	// Convert to final result format
 	images := make(map[string]measurement.Reading)
 	for name, tag := range imageVersions {
@@ -109,7 +126,8 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 		slog.Int("images", len(images)),
 		slog.Int("pods", podCount),
 		slog.Int("pages", pageCount))
-	return images, nil
+	observations.coverage = workloadImageCoverageComplete
+	return images, observations, nil
 }
 
 // stripRegistryPrefix removes the registry domain from image references.

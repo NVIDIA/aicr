@@ -699,6 +699,11 @@ The agent requires these permissions (created automatically by the CLI):
 - **ClusterRole** (`aicr-node-reader-<run-id>`, run-scoped): Read access to nodes and pods; `get`/`list` access to ClusterPolicy CRDs (`nvidia.com`); cluster-wide `list` access to Slinky Controller, NodeSet, LoginSet, RestApi, and Accounting CRs (`slinky.slurm.net`); cluster-wide `list` access to official MariaDB CRs (`k8s.mariadb.com`); `get`/`list` access to DaemonSets (`apps`, for OKE legacy device-plugin detection); `list` access to StorageClasses (`storage.k8s.io`, for default StorageClass detection); and cluster-wide `list` access to PerconaServerMongoDB CRs (`psmdb.percona.com`)
 - **Role** (`aicr-<run-id>`, run-scoped): Create/update ConfigMaps and list pods in the deployment namespace
 
+Retained agent snapshots include workload image observations, with Pod
+namespaces, names and UIDs, Node identity, and full image references that
+may include private registry paths. The agent uses its existing Pod and
+Node permissions to collect these observations.
+
 The baseline ClusterRole above is read-only (`get`/`list` only). Slinky
 detection projects only allowlisted identity, association, and boolean fields;
 it omits free-form configuration, status, pod templates, and Secret/ConfigMap

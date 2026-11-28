@@ -65,17 +65,15 @@ type Collector struct {
 // sub-collector's failure is logged and swallowed (returning nil to errgroup),
 // matching the prior sequential collectSafe semantics so the snapshot
 // continues on partial failure.
-func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
+func (k *Collector) Collect(callerCtx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting Kubernetes cluster information")
 
-	// Held before the shadowing below so the cancellation checks in the Slinky
-	// and other custom-resource branches can consult the caller's context directly. See
-	// cancellationErr for why the derived contexts are not sufficient.
-	callerCtx := ctx
-
-	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorK8sTimeout)
+	ctx, cancel := context.WithTimeout(callerCtx, defaults.CollectorK8sTimeout)
 	defer cancel()
+	return k.collectWithinDeadline(ctx, callerCtx)
+}
 
+func (k *Collector) collectWithinDeadline(ctx, callerCtx context.Context) (*measurement.Measurement, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "K8s collector context cancelled", err)
 	}
@@ -87,16 +85,17 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	}
 
 	var (
-		versions  map[string]measurement.Reading
-		images    map[string]measurement.Reading
-		policies  map[string]measurement.Reading
-		node      map[string]measurement.Reading
-		slinky    measurement.Subtype
-		mariaDB   measurement.Subtype
-		okeLegacy measurement.Subtype
-		okeGPU    measurement.Subtype
-		storage   measurement.Subtype
-		percona   measurement.Subtype
+		versions       map[string]measurement.Reading
+		images         map[string]measurement.Reading
+		workloadImages workloadImageObservations
+		policies       map[string]measurement.Reading
+		node           map[string]measurement.Reading
+		slinky         measurement.Subtype
+		mariaDB        measurement.Subtype
+		okeLegacy      measurement.Subtype
+		okeGPU         measurement.Subtype
+		storage        measurement.Subtype
+		percona        measurement.Subtype
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -119,11 +118,13 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	})
 
 	g.Go(func() error {
-		var err error
-		images, err = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
-			return k.collectContainerImages(gctx)
+		var collectErr error
+		images, collectErr = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
+			summary, observations, err := k.collectContainerImages(gctx)
+			workloadImages = observations
+			return summary, err
 		})
-		return err
+		return collectErr
 	})
 
 	g.Go(func() error {
@@ -196,6 +197,15 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "K8s collection cancelled", err)
 	}
 
+	// Join required reads before starting optional enrichment. Reaching the
+	// collector deadline here leaves the completed Pod scan intact.
+	if workloadImages.coverage == workloadImageCoverageComplete {
+		workloadImages.enrichNodes(ctx, k.ClientSet.CoreV1().Nodes())
+	}
+	if err := callerCtx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "K8s collection cancelled", err)
+	}
+
 	res := measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("server").Set(measurement.KeyVersion, versions[measurement.KeyVersion]).
@@ -203,6 +213,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 				Set("goVersion", versions["goVersion"]),
 		).
 		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: images}).
+		WithSubtype(workloadImages.subtype()).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: policies}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
 		WithSubtype(slinky).
@@ -276,6 +287,7 @@ func emptyK8sMeasurement() *measurement.Measurement {
 	return measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtype(measurement.Subtype{Name: "server", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: empty}).
+		WithSubtype(unavailableWorkloadImages()).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
 		WithSubtype(unknownSlinkySubtype()).

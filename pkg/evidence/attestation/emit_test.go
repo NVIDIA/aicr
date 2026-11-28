@@ -46,6 +46,18 @@ func snapshotWithSensitiveData() *snapshotter.Snapshot {
 				SetString("provider-id", "aws:///us-west-2a/i-0123456789abcdef0").
 				SetString("provider", "eks")).
 			WithSubtype(measurement.Subtype{
+				Name: measurement.SubtypeK8sWorkloadImages,
+				Data: map[string]measurement.Reading{"coverage": measurement.Str("complete")},
+				Items: []measurement.ItemEntry{{
+					Context: map[string]string{
+						"namespace": "private-workloads", "pod": "internal-workload", "pod-uid": "fixture-workload-uid",
+					},
+					Data: map[string]measurement.Reading{
+						"requested-image": measurement.Str("registry.invalid/private/workload:stable"),
+					},
+				}},
+			}).
+			WithSubtype(measurement.Subtype{
 				Name: "slinky-slurm",
 				Data: map[string]measurement.Reading{
 					"collection-state": measurement.Str("detected"),
@@ -113,6 +125,8 @@ func TestEmit_MinimalByDefault_RedactsSnapshotAndRecordsPolicy(t *testing.T) {
 		"source-node", "provider-id", "i-0123456789abcdef0",
 		"custom-cost-center", "acct-99887766", "slinky-slurm",
 		"mariadb-operator", "controller/slurm/cluster",
+		measurement.SubtypeK8sWorkloadImages, "private-workloads", "internal-workload",
+		"fixture-workload-uid", "registry.invalid/private/workload:stable",
 	} {
 		if strings.Contains(string(body), secret) {
 			t.Errorf("redacted snapshot.yaml still contains %q:\n%s", secret, body)
@@ -184,7 +198,12 @@ func TestEmit_FullKeepsRawSnapshotAndNoRedaction(t *testing.T) {
 	if !strings.Contains(string(body), "provider-id") ||
 		!strings.Contains(string(body), "custom-cost-center") ||
 		!strings.Contains(string(body), "slinky-slurm") ||
-		!strings.Contains(string(body), "mariadb-operator") {
+		!strings.Contains(string(body), "mariadb-operator") ||
+		!strings.Contains(string(body), measurement.SubtypeK8sWorkloadImages) ||
+		!strings.Contains(string(body), "private-workloads") ||
+		!strings.Contains(string(body), "internal-workload") ||
+		!strings.Contains(string(body), "fixture-workload-uid") ||
+		!strings.Contains(string(body), "registry.invalid/private/workload:stable") {
 
 		t.Errorf("full bundle must retain raw snapshot detail:\n%s", body)
 	}

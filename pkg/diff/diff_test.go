@@ -85,6 +85,43 @@ func assertChanges(t *testing.T, result *Result, want []Change) {
 	}
 }
 
+func TestSnapshots_ExcludeWorkloadImageObservations(t *testing.T) {
+	k8s := func(pod, uid, legacyVersion string) *measurement.Measurement {
+		return makeMeasurement(measurement.TypeK8s,
+			measurement.Subtype{
+				Name: "workload-images",
+				Data: map[string]measurement.Reading{"coverage": measurement.Str("complete")},
+				Items: []measurement.ItemEntry{{
+					Context: map[string]string{"pod": pod, "pod-uid": uid},
+					Data:    map[string]measurement.Reading{"requested-image": measurement.Str("worker:stable")},
+				}},
+			},
+			makeSubtype("image", map[string]measurement.Reading{"worker": measurement.Str(legacyVersion)}),
+		)
+	}
+
+	baseline := makeSnapshot(k8s("aicr-agent-first", "uid-first", "stable"))
+	replacement := makeSnapshot(k8s("aicr-agent-second", "uid-second", "stable"))
+	updatedLegacy := makeSnapshot(k8s("aicr-agent-second", "uid-second", "next"))
+	empty := makeSnapshot()
+	for _, tc := range []struct {
+		name             string
+		baseline, target *snapshotter.Snapshot
+		wantPaths        []string
+	}{
+		{"Pod churn", baseline, replacement, []string{}},
+		{"legacy image change", baseline, updatedLegacy, []string{"K8s.image.worker"}},
+		{"added K8s", empty, replacement, []string{"K8s.image.worker"}},
+		{"removed K8s", baseline, empty, []string{"K8s.image.worker"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := paths(Snapshots(tc.baseline, tc.target)); !reflect.DeepEqual(got, tc.wantPaths) {
+				t.Fatalf("changed paths = %v, want %v", got, tc.wantPaths)
+			}
+		})
+	}
+}
+
 func TestSnapshots_SubtypeContext(t *testing.T) {
 	tests := []struct {
 		name       string

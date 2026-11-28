@@ -91,8 +91,8 @@ func TestImageCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// server, image, policy, node, and six custom-resource evidence subtypes.
-	assert.Len(t, m.Subtypes, 10)
+	// Server, image summary, workload images, policy, node, and resource evidence.
+	assert.Len(t, m.Subtypes, 11)
 
 	// Find the image subtype
 	var imageSubtype *measurement.Subtype
@@ -240,8 +240,9 @@ func TestImageCollector_Pagination_MultiplePages(t *testing.T) {
 	var pageCalls atomic.Int32
 	installPaginatedPodReactor(t, fakeClient, pods, int(defaults.K8sPodListPageSize), &pageCalls)
 
-	images, err := collector.collectContainerImages(context.Background())
+	images, observations, err := collector.collectContainerImages(t.Context())
 	assert.NoError(t, err)
+	assert.Equal(t, "limited", observations.subtype().Data["coverage"].Any())
 	assert.Len(t, images, total, "expected one unique image per pod across all pages")
 
 	// 1250 / 500 = 2.5 -> 3 pages
@@ -269,7 +270,7 @@ func TestImageCollector_Pagination_SinglePage(t *testing.T) {
 	var pageCalls atomic.Int32
 	installPaginatedPodReactor(t, fakeClient, pods, int(defaults.K8sPodListPageSize), &pageCalls)
 
-	images, err := collector.collectContainerImages(context.Background())
+	images, _, err := collector.collectContainerImages(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, images, 10)
 	assert.Equal(t, int32(1), pageCalls.Load(), "expected exactly one list call")
@@ -312,7 +313,7 @@ func TestImageCollector_Pagination_ContextCancellationBreaksLoop(t *testing.T) {
 		return true, page, nil
 	})
 
-	images, err := collector.collectContainerImages(ctx)
+	images, _, err := collector.collectContainerImages(ctx)
 	// Cancellation triggers a wrapped timeout error; result must be nil.
 	assert.Error(t, err)
 	assert.Nil(t, images)

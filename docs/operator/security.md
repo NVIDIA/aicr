@@ -19,7 +19,7 @@ accidental or casual misuse; they do not contain a fully compromised operator.
 | Validators (`aicr-validator`) | Validation | AICR v1.1.0 and later: `cluster-admin`, which AICR's validators require | Installed only with `validation.enabled` |
 | Readiness gates | Component namespaces | Read-only access shipped in AICR's readiness charts | |
 | Argo CD | Argo CD | Its own identity, from its installation | |
-| Approvers (`aicr-operator-approver`) | — | Read rollouts and the runtime; set a rollout's approval or revocation; read ConfigMaps in the operator namespace (assessment reports) | Edit the `ClusterRuntime`; read Secrets |
+| Approvers (`aicr-operator-approver`) | — | Read rollouts and the runtime; set a rollout's approval or revocation; read ConfigMaps in the operator namespace (assessment reports and stored snapshots, including workload image observations with Pod identities and full image references) | Edit the `ClusterRuntime`; read Secrets |
 
 The chart creates no role for editing the `ClusterRuntime`. Grant it to the
 runtime administrators yourself, and keep them apart from approvers, so nobody

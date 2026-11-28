@@ -301,6 +301,9 @@ func compareMeasurements(ctx context.Context, base, target *measurement.Measurem
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if isWorkloadImageObservation(base.Type, name) {
+			continue
+		}
 		baseSt, baseExists := baseByName[name]
 		targetSt, targetExists := targetByName[name]
 
@@ -589,6 +592,9 @@ func addedMeasurement(ctx context.Context, m *measurement.Measurement) ([]Change
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if isWorkloadImageObservation(m.Type, m.Subtypes[i].Name) {
+			continue
+		}
 		added, err := addedSubtype(ctx, string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])
 		if err != nil {
 			return nil, err
@@ -603,6 +609,9 @@ func removedMeasurement(ctx context.Context, m *measurement.Measurement) ([]Chan
 	for i := range m.Subtypes {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if isWorkloadImageObservation(m.Type, m.Subtypes[i].Name) {
+			continue
 		}
 		removed, err := removedSubtype(ctx, string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])
 		if err != nil {
@@ -645,6 +654,11 @@ func removedSubtype(ctx context.Context, prefix string, st *measurement.Subtype)
 		return nil, err
 	}
 	return append(changes, items...), nil
+}
+
+// Workload images record run-scoped Pod state, which is not configuration drift.
+func isWorkloadImageObservation(kind measurement.Type, subtype string) bool {
+	return kind == measurement.TypeK8s && subtype == measurement.SubtypeK8sWorkloadImages
 }
 
 func indexSubtypes(ctx context.Context, subtypes []measurement.Subtype) (map[string]*measurement.Subtype, error) {

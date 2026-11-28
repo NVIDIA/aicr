@@ -1395,8 +1395,9 @@ After the command finishes:
 
 The bundle is **minimized by default**. `snapshot.yaml` keeps only an
 allowlisted set of fields (dropping node names, provider instance IDs, the
-node label/taint set, OS tuning, loaded modules, and systemd config) and the
-CTRF reports omit per-test stdout/message. Each test's CTRF `extra` keeps only
+node label/taint set, OS tuning, loaded modules, systemd config, and workload
+image observations with Pod identities and full image references). The CTRF
+reports omit per-test stdout/message. Each test's CTRF `extra` keeps only
 allowlisted counts, measurements, thresholds, versions, allocation modes,
 transport, fabric, and runtime-source codes, the `nodeLocal` and
 `versionSatisfied` booleans, and skip-reason codes, never node names or IPs, and
