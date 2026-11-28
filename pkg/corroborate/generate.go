@@ -962,7 +962,9 @@ func assembleGroups(builts []recipeTab) []Group {
 			})
 			dashboards = append(dashboards, Dashboard{Accelerator: da.accelerator, OS: da.os, Tabs: da.tabs})
 		}
-		groups = append(groups, Group{Service: svc, Dashboards: dashboards})
+		groups = append(groups, Group{
+			Service: svc, DisplayName: recipe.CriteriaServiceType(svc).DisplayName(), Dashboards: dashboards,
+		})
 	}
 	return groups
 }

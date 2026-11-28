@@ -60,23 +60,9 @@
 //
 // # Criteria Types
 //
-// Service types for Kubernetes environments:
-//   - CriteriaServiceEKS: Amazon EKS
-//   - CriteriaServiceGKE: Google GKE
-//   - CriteriaServiceAKS: Azure AKS
-//   - CriteriaServiceOKE: Oracle OKE
-//   - CriteriaServiceKind: kind (local clusters)
-//   - CriteriaServiceLKE: Linode LKE
-//   - CriteriaServiceBCM: NVIDIA Base Command Manager
-//   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
-//   - CriteriaServiceMetal3: Metal3 bare-metal provisioning
-//   - CriteriaServiceRKE2: Rancher Kubernetes Engine 2 (bare-metal)
-//   - CriteriaServiceGeneric: generic self-managed Kubernetes (no distinguishing distro or provisioner; opt-in-only, never inferred from a snapshot)
-//   - CriteriaServiceK0s: k0s (self-managed k0s clusters)
-//   - CriteriaServiceMK8s: Nebius Managed Service for Kubernetes
-//   - CriteriaServiceNVKE: NVIDIA Kubernetes Engine (Forge/NICo bare metal)
-//   - CriteriaServiceCKS: CoreWeave Kubernetes Service
-//   - CriteriaServiceAny: Any service (wildcard)
+// Kubernetes service IDs are declared by [CriteriaServiceType] and listed by
+// [GetCriteriaServiceTypes]. [CriteriaServiceType.DisplayName] supplies their
+// canonical presentation names, falling back to the exact ID for custom values.
 //
 // Accelerator types for GPU selection:
 //   - CriteriaAcceleratorH100: NVIDIA H100
