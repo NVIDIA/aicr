@@ -1,0 +1,131 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: agentgateway
+transitions:
+  # from starts at 1.5.0, the release AICR pinned before 1.7.0 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=1.5.0 <1.7.0"
+    to: "1.7.0"
+    verdict: manual
+    summary: >-
+      The controller now serves the AgentgatewayModel API, which AICR's values
+      left off at 1.5.0, so existing AgentgatewayModel objects start routing,
+      and a model spec.baseURL without a path now means /, where 1.5
+      appended /v1 for custom and Ollama providers. Configured LLM traffic
+      also changes: prompt guards inspect tool output and reject when a
+      streamed-response check fails, CEL lookups of a repeated header return
+      a list, models attached directly to a Gateway or ListenerSet serve only
+      exact LLM paths, Anthropic Messages requests convert through the
+      Responses API (dropping extended-thinking history), a built-in model
+      catalog prices requests to common public models so cost budgets and
+      llm.cost expressions start counting them, and dynamic backends refuse
+      loopback and link-local addresses. AICR creates no AgentgatewayModel,
+      guard, policy or dynamic backend, so a default install needs only the
+      apply.
+    precondition: >-
+      Know whether the cluster has AgentgatewayModel objects and how they
+      attach (directly to a Gateway or ListenerSet, or through an HTTPRoute),
+      whether an OpenAI provider points at a server other than the OpenAI
+      API, whether any policy configures prompt guards, cost budgets or CEL
+      expressions over request headers or llm.cost, and whether a dynamic
+      backend targets a loopback or link-local address. If none does, only
+      the apply step applies.
+    stepsByDeployer:
+      - steps:
+          - id: review-models
+            description: >-
+              Only if AgentgatewayModel objects exist: confirm each one should
+              serve traffic, and add the provider API path to any
+              spec.baseURL that has none, for example
+              https://api.openai.com/v1, before applying.
+            reason: >-
+              From 1.7 the controller serves the kind by default, and a base
+              URL without a path sends requests to /, which providers reject.
+          - id: route-prefixed-models
+            description: >-
+              Only if an AgentgatewayModel attached directly to a Gateway or
+              ListenerSet serves a prefixed path such as
+              /tenant-a/v1/messages: attach it through an HTTPRoute instead,
+              before applying.
+            reason: >-
+              Model routers attached directly to a Gateway or ListenerSet now
+              serve only exact standard LLM paths, so a prefixed request is
+              passed through without format conversion.
+          - id: fix-provider-formats
+            description: >-
+              Only if an OpenAI provider points at a server other than the
+              OpenAI API: configure it as a custom provider that advertises
+              only the formats that server supports, before applying.
+            reason: >-
+              Anthropic Messages requests now always convert through the
+              Responses format when a provider offers it, and the setting that
+              preferred Chat Completions is removed, so a server without
+              /v1/responses rejects them and extended-thinking history is
+              dropped.
+          - id: keep-guard-scope
+            description: >-
+              Only if request prompt guards are configured and must not
+              inspect tool output: give each guard under promptGuard.request
+              that sets no scope the scope [SystemPrompt, Messages], before
+              applying. Leave a guard that already sets a scope, and every
+              promptGuard.response guard, as it is.
+            reason: >-
+              1.7 adds ToolOutput to the default request scope, which can
+              reject or mask requests that passed before. An explicit scope is
+              not affected, and overwriting it can drop inspection it chose,
+              such as ToolInput. Response guards gain scope only in 1.7, and
+              with streaming enabled they accept only Messages.
+          - id: check-header-expressions
+            description: >-
+              Only if CEL expressions read request headers that can repeat:
+              make them accept a list value, before applying.
+            reason: >-
+              A header that appears more than once now evaluates to a list.
+          - id: allow-dynamic-loopback
+            description: >-
+              Only if a dynamic backend must reach a loopback or link-local
+              address: set config.backend.allowDynamicLoopback to true in the
+              spec.rawConfig of an AgentgatewayParameters you manage; AICR
+              re-creates its own system-proxy parameters on every upgrade.
+            reason: >-
+              1.7 rejects those destinations by default, including cloud
+              metadata servers.
+          - id: review-cost-policies
+            description: >-
+              Only if USD budgets, cost-based rate limits or CEL expressions
+              use llm.cost: review them against the built-in catalog's default
+              pricing for common public models, before applying.
+            reason: >-
+              1.6 prices those requests without a configured catalog, so
+              budgets and cost limits that saw no cost before start counting
+              them.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: Moves agentgateway to 1.7.0.
+          - id: set-guard-failure-mode
+            description: >-
+              Only if OpenAI Moderation, Bedrock Guardrails or Google Model
+              Armor guards must keep the 1.5 behavior on streamed responses:
+              set their failureMode to FailOpen once the new version runs.
+            reason: >-
+              A guard failure while checking a streamed response now rejects
+              the content, and the 1.5.0 schema has no failureMode on these
+              guards.
+    references:
+      - https://github.com/agentgateway/agentgateway/releases/tag/v1.6.0
+      - https://github.com/agentgateway/agentgateway/releases/tag/v1.7.0
