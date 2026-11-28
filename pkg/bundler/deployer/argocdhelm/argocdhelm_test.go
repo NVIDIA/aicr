@@ -2579,6 +2579,7 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 	}
 
 	for _, rel := range []string{
+		"README.md", // inline README: install commands and Dynamic Values
 		"Chart.yaml",
 		"values.yaml",
 		"values.schema.json",        // install-time deployer.* schema gate
@@ -2649,6 +2650,7 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 	}
 
 	for _, rel := range []string{
+		"README.md", // inline README: --set flag and Dynamic Values for a nested path
 		"Chart.yaml",
 		"values.yaml",
 		"templates/aicr-stack.yaml",        // parent App, Helm-templated

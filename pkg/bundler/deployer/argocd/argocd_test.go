@@ -130,9 +130,8 @@ func TestGenerate_Success(t *testing.T) {
 	assertValidYAML(t, filepath.Join(outputDir, "001-cert-manager", "application.yaml"))
 	assertValidYAML(t, filepath.Join(outputDir, "002-gpu-operator", "application.yaml"))
 
-	// Verify README contains component information. README is not golden-
-	// tested because it carries operator guidance with absolute paths
-	// (TempDir-dependent) that wouldn't survive byte-comparison.
+	// Verify README contains component information. The full rendered
+	// README is pinned by TestBundleGolden_*.
 	readmePath := filepath.Join(outputDir, "README.md")
 	content, err := os.ReadFile(readmePath)
 	if err != nil {
@@ -321,9 +320,8 @@ func snippetAround(haystack, needle string) string {
 	return haystack[i:end]
 }
 
-// TestGenerate_UpgradeNotice covers a non-empty notice. The README has no
-// golden, so the empty case asserts the Components table still runs straight
-// into Prerequisites.
+// TestGenerate_UpgradeNotice covers both the empty and non-empty notice
+// renders; the README golden(s) pin only the empty one.
 func TestGenerate_UpgradeNotice(t *testing.T) {
 	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
 	tests := []struct {
@@ -1755,10 +1753,11 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// Freeze both Application shapes and a sample local-chart template body.
-	// Don't golden the README or Chart.yaml inside the wrapped chart — those
-	// carry no behavior beyond what the templates already commit to.
+	// Freeze both Application shapes, a sample local-chart template body,
+	// and the README, whose Components table and directory tree render both
+	// the Helm and the local-chart rows.
 	for _, rel := range []string{
+		"README.md",
 		"001-cert-manager/application.yaml",
 		"001-cert-manager/values.yaml",
 		"002-nodewright-customizations/application.yaml",
@@ -1905,6 +1904,8 @@ func TestBundleGolden_MixedWithPre(t *testing.T) {
 	}
 
 	for _, rel := range []string{
+		// README lists the pre, primary, and post folders in sync-wave order
+		"README.md",
 		// Pre: path-based single-source wrapping rendered Namespace
 		"001-gpu-operator-pre/application.yaml",
 		"001-gpu-operator-pre/Chart.yaml",
