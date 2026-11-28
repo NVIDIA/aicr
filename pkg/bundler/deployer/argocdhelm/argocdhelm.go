@@ -649,7 +649,9 @@ func (g *Generator) writeLockTemplates(
 		return err
 	}
 	for _, writeLock := range []func(string) (string, int64, error){
-		g.writeProfileLockTemplate,
+		func(dir string) (string, int64, error) {
+			return g.writeProfileLockTemplate(dir, rootDefaults)
+		},
 		func(dir string) (string, int64, error) {
 			return g.writeDriverOwnershipLockTemplate(dir, rootDefaults, subcharts)
 		},
@@ -671,8 +673,9 @@ func (g *Generator) writeLockTemplates(
 // parent chart's .Values; the guard rejects any install-time key whose path
 // equals, contains, or is contained by a profile-owned path. Key existence is
 // used throughout, so false, null, empty maps, and empty lists cannot bypass
-// the lock. Unprofiled bundles emit no profile guard.
-func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64, error) {
+// the lock, and an ancestor rootDefaults populates must stay present, so a
+// null cannot erase it either. Unprofiled bundles emit no profile guard.
+func (g *Generator) writeProfileLockTemplate(templatesDir string, rootDefaults map[string]any) (string, int64, error) {
 	if g.RecipeResult == nil || g.RecipeResult.Metadata.SelectedProfile == nil {
 		return writeGuardTemplate(templatesDir, profileLockTemplate, "", false)
 	}
@@ -710,7 +713,7 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 				append([]string{overrideKey}, strings.Split(lockedPath, ".")...),
 				fmt.Sprintf("aicrProfile%d_%d", componentIndex, pathIndex),
 				"install-time value intersects profile-owned path "+displayPath,
-				nil,
+				rootDefaults,
 			)
 		}
 	}
@@ -916,7 +919,6 @@ func hasGeneratedGuardHeader(reader io.Reader, header string) (bool, error) {
 // writePathGuard rejects a guarded leaf or a non-map ancestor. An ancestor
 // present in defaults must remain present: Helm coalescing erases null values
 // against defaults before templates see them, so disappearance is a violation.
-// Nil defaults preserve the profile guard's existing byte representation.
 func writePathGuard(
 	buf *strings.Builder,
 	parent string,
@@ -956,7 +958,8 @@ func writePathGuard(
 // static/<name>.yaml files, the root values.yaml (with appName, repoURL,
 // targetRevision, and deployer defaults injected), and values.schema.json.
 // Each written file is appended to output.Files/TotalSize. The returned root
-// defaults let the driver-ownership guard detect null-coalesced ancestors.
+// defaults let the profile and driver-ownership guards detect null-coalesced
+// ancestors.
 func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) (map[string]any, error) {
 	// PropagateOrWrap rather than Wrap: writeStaticValuesAndBuildStubs now
 	// reports a non-directory at the static path as ErrCodeInvalidRequest, and

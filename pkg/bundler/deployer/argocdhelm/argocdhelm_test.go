@@ -350,6 +350,16 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 				wantErr:   true,
 			},
 			{
+				name:      "null ancestor the defaults lack still intersects",
+				extraArgs: []string{"--set-json", "gpuoperator.driver=null"},
+				wantErr:   true,
+			},
+			{
+				name:      "null component key the defaults lack still intersects",
+				extraArgs: []string{"--set-json", "gpuoperator=null"},
+				wantErr:   true,
+			},
+			{
 				name:      "synthetic presence intersects",
 				extraArgs: []string{"--set", "gpuoperator.enabled=true"},
 				wantErr:   true,
@@ -545,6 +555,86 @@ func TestGenerate_ProfileLockTemplateBytes(t *testing.T) {
 	guard := readBundleFile(t, outputDir, "templates/"+profileLockTemplateName+".yaml")
 	if got := fmt.Sprintf("%x", sha256.Sum256(guard)); got != wantHash {
 		t.Fatalf("profile lock bytes changed: sha256 = %s, want %s\n%s", got, wantHash, guard)
+	}
+}
+
+// TestHelmTemplate_ProfileLockDynamicSiblings covers a profile-owned path whose
+// ancestors the root defaults populate, because a --dynamic sibling lives under
+// them. Helm coalescing erases an install-time null against those defaults
+// before the guard runs, so the guard must reject the ancestor's absence.
+func TestHelmTemplate_ProfileLockDynamicSiblings(t *testing.T) {
+	helmtest.RequireBinary(t)
+
+	result := newRecipeResult("v1.0.0", []recipe.ComponentRef{{
+		Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+		Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+		Source: "https://helm.ngc.nvidia.com/nvidia",
+	}})
+	result.APIVersion = recipe.RecipeProfileAPIVersion
+	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name:       "gpuStack",
+		Value:      "driver-installed",
+		OwnedPaths: map[string][]string{"gpu-operator": {"operator.runtimeClass"}},
+	}
+	g := &Generator{
+		RecipeResult: result,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"operator": map[string]any{
+				"runtimeClass":      "nvidia",
+				"priorityClassName": "system-node-critical",
+			}},
+		},
+		DynamicValues: map[string][]string{"gpu-operator": {"operator.priorityClassName"}},
+		Version:       "v0.0.0-test",
+	}
+	outputDir := t.TempDir()
+	if _, err := g.Generate(t.Context(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var root map[string]any
+	if err := yaml.Unmarshal(readBundleFile(t, outputDir, "values.yaml"), &root); err != nil {
+		t.Fatalf("parse root defaults: %v", err)
+	}
+	if _, present := component.GetValueByPath(root, "gpuoperator.operator.priorityClassName"); !present {
+		t.Fatal("dynamic sibling missing from root defaults; the null-ancestor cases would not exercise coalescing")
+	}
+	if _, present := component.GetValueByPath(root, "gpuoperator.operator.runtimeClass"); present {
+		t.Fatal("profile-owned path leaked into root defaults")
+	}
+
+	render := func(t *testing.T, args ...string) (string, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
+		defer cancel()
+		args = append([]string{"template", "test", outputDir, "--set", "repoURL=oci://example.test/aicr"}, args...)
+		out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput() //nolint:gosec // controlled test arguments
+		return string(out), err
+	}
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{name: "no override"},
+		{name: "bundle defaults", args: []string{"-f", filepath.Join(outputDir, "values.yaml")}},
+		{name: "dynamic sibling", args: []string{"--set", "gpuoperator.operator.priorityClassName=other"}},
+		// The sibling is a leaf, not an ancestor of the owned path, so erasing it
+		// leaves the guard nothing to protect.
+		{name: "null dynamic sibling", args: []string{"--set-json", "gpuoperator.operator.priorityClassName=null"}},
+	} {
+		t.Run("allowed/"+tt.name, func(t *testing.T) {
+			if out, err := render(t, tt.args...); err != nil {
+				t.Fatalf("helm template error = %v\n%s", err, out)
+			}
+		})
+	}
+	for _, ancestor := range []string{"gpuoperator", "gpuoperator.operator"} {
+		t.Run("null/"+ancestor, func(t *testing.T) {
+			out, err := render(t, "--set-json", ancestor+"=null")
+			if err == nil || !strings.Contains(out, "install-time value intersects profile-owned path gpu-operator.operator.runtimeClass") {
+				t.Fatalf("null ancestor not rejected by the profile lock: err=%v\n%s", err, out)
+			}
+		})
 	}
 }
 
@@ -1368,7 +1458,7 @@ func TestWriteProfileLockTemplateRejectsUnownedExistingFile(t *testing.T) {
 			},
 		},
 	}}
-	_, _, err := g.writeProfileLockTemplate(templatesDir)
+	_, _, err := g.writeProfileLockTemplate(templatesDir, nil)
 	if err == nil {
 		t.Fatal("writeProfileLockTemplate() accepted a user-owned template collision")
 	}
