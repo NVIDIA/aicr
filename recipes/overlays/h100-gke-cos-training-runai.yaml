@@ -89,3 +89,206 @@ spec:
         - prometheus-operator-crds
         - cert-manager
         - kubeflow-training-operator
+
+    # NVSentinel quarantine lines up with Run:ai's faulty-GPU-node taint
+    # (#3302, Phase 3). Run:ai reports its GPU stack unavailable while a
+    # gpu-fractioning daemon (fractiond, mpsd) is expected on a node and not
+    # ready there, and a cordon does not take a node out of a DaemonSet. Those
+    # daemons tolerate only nvidia.com/gpu (components/runai-cluster/values.yaml),
+    # so runai/gpu-fault=true:NoSchedule, the taint Run:ai documents for this
+    # case, does. fault-quarantine lifts it together with the cordon once every
+    # fault on the node has recovered.
+    #
+    # Inert as shipped: fault-quarantine renders only once nvsentinel-quarantine
+    # or nvsentinel-remediation is composed, and applies no taint in
+    # nvsentinel-observe's dry run.
+    #
+    # Helm replaces lists, so this restates the chart's whole default list
+    # (NVSentinel v1.32.0) and adds the taint to each rule set that cordons.
+    # The NVCRE rule set does not cordon and keeps its own taint.
+    # TestNVSentinelRunaiQuarantineTaintChartRender diffs the list against the
+    # chart's.
+    #
+    # Not yet with nvsentinel-remediation's post-reboot validation, which hands
+    # the taint to lifecycle-manager: the taint would have to be listed under
+    # lifecycle-manager.config.schedulingGate.taints, and the chart's test Job
+    # template writes each listed value unquoted, so "true" reaches the API
+    # server as a boolean. CheckNVSentinelPostRemediationValidationCoherent
+    # refuses that bundle.
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        fault-quarantine:
+          ruleSets:
+            - enabled: true
+              version: "1"
+              name: "GPU fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'gpu-health-monitor' && event.componentClass == 'GPU' && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "CSP health monitor fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'csp-health-monitor' && event.checkName == 'CSPMaintenance' && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "Syslog fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'syslog-health-monitor' && (event.componentClass == 'GPU' || event.componentClass == 'NIC') && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "NIC health monitor fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'nic-health-monitor' && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "Kubernetes object monitor fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'kubernetes-object-monitor' && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "NVCRE certification monitor failure ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'nvcre-certification-monitor' && event.checkName == 'NVCRECertFailed' && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: false
+              taint:
+                key: "nvsentinel.dgxc.nvidia.com/nvcre-cert-failed"
+                value: "true"
+                effect: "NoSchedule"
+            - enabled: true
+              version: "1"
+              name: "Preflight check fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent.startsWith('preflight-') && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "Health events analyzer fatal error ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'health-events-analyzer' && event.isFatal == true"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+            - enabled: true
+              version: "1"
+              name: "MaintenanceRequest ruleset"
+              match:
+                all:
+                  - kind: "HealthEvent"
+                    expression: "event.agent == 'lifecycle-manager' && event.metadata != null && 'maintenanceRequestName' in event.metadata"
+                  - kind: "Node"
+                    expression: >-
+                      !('k8saas.nvidia.com/ManagedByNVSentinel' in node.metadata.labels && node.metadata.labels['k8saas.nvidia.com/ManagedByNVSentinel'] == "false") &&
+                      !('nvsentinel.dgxc.nvidia.com/managed' in node.metadata.labels && node.metadata.labels['nvsentinel.dgxc.nvidia.com/managed'] == "false")
+              cordon:
+                shouldCordon: true
+              taint:
+                key: runai/gpu-fault
+                value: "true"
+                effect: NoSchedule
+
+    # The GPU Operator's operands tolerate that taint: one that does not is
+    # left misscheduled on the node, and the operator's upgrade controller then
+    # aborts every driver upgrade in the cluster (#3357). The other two entries
+    # restate base.yaml's list, which a list set here replaces.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        daemonsets:
+          tolerations:
+            - key: runai/gpu-fault
+              operator: Exists
+              effect: NoSchedule
+            - key: nvsentinel.dgxc.nvidia.com/external-remediation
+              operator: Exists
+              effect: NoSchedule
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule

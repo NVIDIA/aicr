@@ -4250,7 +4250,7 @@ h100-eks-ubuntu-training-runai:
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: e0221ae90329735340c5154ec3f38dc37558bfd3e061ca8d0363b8a3ac761b03
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  011-gpu-operator/values.yaml: c08d4a73f7fe08e3b98e3e8abdbd513a7a6a12f0086bb8e38f2c5708a68dc986
   012-nktp/apply-crds.sh: 0402e6f84d86d16247ad8882956ad657900872f629df633c69845d3c8b165e02
   012-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nktp/install.sh: 2c38177e4d3c6307da8ee646a2cbfc4ab453a15e2066b251a1e712259d298b09
@@ -4264,7 +4264,7 @@ h100-eks-ubuntu-training-runai:
   014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nvsentinel/install.sh: 88363f6321e491211026e8aca9a99a75ed1893e7f6e576b9912697269cf15f95
   014-nvsentinel/upstream.env: a6151216963428877050a229dad68ce7e65a872fd7522cecc50172cd5609f3a7
-  014-nvsentinel/values.yaml: b597218adaa6789a1458cc1dd1df95d0959db62bd80076cf31d8284c9e73f282
+  014-nvsentinel/values.yaml: a7e8d00c9ddb8bad8a3ceea550847e212577ed2ac4374189b51d1bd2f13a3201
   015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -4272,13 +4272,13 @@ h100-eks-ubuntu-training-runai:
   016-runai-cluster/cluster-values.yaml: ab7ca2878b342936f15706083791e7cace64e2a1d5b3131d8c9c4f6533d4cc27
   016-runai-cluster/install.sh: ae940398e95bd7ff34c733dd2c0d83c660a396acb0516ac65c57543ecb15e5a1
   016-runai-cluster/upstream.env: cefc53873a73bc2c6782645d393c283bd0ff5209bb331e9071ad4155839c598e
-  016-runai-cluster/values.yaml: d9fb7851f728802a9e93683f4d25810a573193d9de65ef14ce955737166955b1
+  016-runai-cluster/values.yaml: f085bf9a8e9c6e2cbd8e1bdea9c9139c9610e81e6fb57cd79da9a1f6e52b91e7
   README.md: 3837f605496edbb196bf29388e7bc85cc7e32801a0459a0a58217950d82f5144
   UPGRADING.md: fc5acc21136771408fa0f38cd66c789e77d50a5c4c9f39941660f1bb8012fff0
-  bundle-info.yaml: 2ccca71e3e291b3734f29235271bd36977c8686a000023246431f7b2f14e3c2c
-  checksums.txt: 82eb770bb36863291b5df602c6a4e4ec0f68987bc2912cae988354ccb422860c
+  bundle-info.yaml: 0b98a9dce46da6b02a3b3abe3933581b530d0e6660322be3e23e8fe4326235de
+  checksums.txt: bea1c3fbd6ec28a3d378ca717c8c1d5ed85a52d22797f2437989792dedefb3d4
   deploy.sh: fb80fb14537c4a4d7d4eb46aae5f6c514f160c08d1f5116e704ec8d5693e4797
-  recipe.yaml: d393f71ee2884d959f75eb4877d6162f0842481393c727c2f7c31fc36109262a
+  recipe.yaml: a6b4c36cb1fa603b8c762c86e5d4aacece1f2b89a55252ff3da65c317dcb34b9
 h100-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -5113,11 +5113,11 @@ h100-gke-cos-training-runai:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  010-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator-pre/values.yaml: 856179a41324c4e255b6fc5d9013b49a0ebe9de60f39e80fe9727d21ee1abee3
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: e0221ae90329735340c5154ec3f38dc37558bfd3e061ca8d0363b8a3ac761b03
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  011-gpu-operator/values.yaml: 856179a41324c4e255b6fc5d9013b49a0ebe9de60f39e80fe9727d21ee1abee3
   012-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   012-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
@@ -5137,7 +5137,7 @@ h100-gke-cos-training-runai:
   015-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel/install.sh: 88363f6321e491211026e8aca9a99a75ed1893e7f6e576b9912697269cf15f95
   015-nvsentinel/upstream.env: a6151216963428877050a229dad68ce7e65a872fd7522cecc50172cd5609f3a7
-  015-nvsentinel/values.yaml: ac1002082e0256276649ecb0d2138ea8965ebce11eb93212e5d43ad6542a04d0
+  015-nvsentinel/values.yaml: a4f557dc0f66eb38a66c874d539d67a2a278e1934286d22751fc6bbca8856cbc
   016-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
@@ -5145,13 +5145,13 @@ h100-gke-cos-training-runai:
   017-runai-cluster/cluster-values.yaml: ab7ca2878b342936f15706083791e7cace64e2a1d5b3131d8c9c4f6533d4cc27
   017-runai-cluster/install.sh: ae940398e95bd7ff34c733dd2c0d83c660a396acb0516ac65c57543ecb15e5a1
   017-runai-cluster/upstream.env: cefc53873a73bc2c6782645d393c283bd0ff5209bb331e9071ad4155839c598e
-  017-runai-cluster/values.yaml: d9fb7851f728802a9e93683f4d25810a573193d9de65ef14ce955737166955b1
+  017-runai-cluster/values.yaml: f085bf9a8e9c6e2cbd8e1bdea9c9139c9610e81e6fb57cd79da9a1f6e52b91e7
   README.md: 2ddf6d112dcce9098856f5f204c7603fc3a0c1e7fd0e86ea79784f9c6c3c8ea9
   UPGRADING.md: a27e4c2dfdf63837d89230dcb347fbf3a3815ba8f0f899ffb70a76e9782910e6
-  bundle-info.yaml: 6cd14df7ab1c814d38bf3db3b9749eef31df7e23c547445453da6c1b646214f1
-  checksums.txt: 8af472a8bbbc1cae237b28a86c23a84efd9d91b9435d4845aa546bae873da4ee
+  bundle-info.yaml: ccf4fe0eccd5becf2ea0cc53c1dd75c2757b904fc423691b069218f8c6680d33
+  checksums.txt: f7e47600afa81fce0df560a469af15483276529e8229bd0ca9982687ab302f73
   deploy.sh: cd1846b062d3144fe8ba3cb15cdb3687f2b9207e86d938156c36dc22066a1f45
-  recipe.yaml: be46871071589dd2db84cc6694b6c4718d6da074f70cda70b5c959d1c54929e2
+  recipe.yaml: 004c2c8d278b6c94bb43960335b3059130773266ad913a38a3e14e7d3000b59e
 h100-gke-cos-training-slurm:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
