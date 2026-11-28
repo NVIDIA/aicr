@@ -49,7 +49,7 @@ Behavior:
   - Downloads aicr_<version>_<os>_<arch>.tar.gz and aicr_checksums.txt.
   - Verifies the SHA-256 checksum before installing.
   - Installs the matching attestation when included in the archive.
-  - Optionally verifies provenance with cosign v3.0.4 or newer.
+  - Optionally verifies provenance with cosign v3.0.4 or newer and aborts if it fails.
   - Removes an old attestation if the archive does not include one.
   - On macOS, removes the com.apple.quarantine attribute if Gatekeeper set it.
   - Uses sudo automatically when the install directory is not user-writable.
@@ -228,15 +228,17 @@ if [[ -f "$ATTEST_SRC" ]]; then
       log_warning "Installed cosign version ($COSIGN_VERSION) is older than the minimum required ($COSIGN_MIN_VERSION); skipping provenance verification"
     else
       log_info "Verifying provenance attestation (Sigstore cosign)…"
+      tag_re=${TAG//./\\.}
+      identity_re="^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/${tag_re}\$"
       if cosign verify-blob-attestation \
         --bundle "$ATTEST_SRC" \
         --type https://slsa.dev/provenance/v1 \
         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
+        --certificate-identity-regexp "$identity_re" \
         "$BIN_SRC"; then
         log_success "Provenance verified — binary built by the AICR release workflow in NVIDIA/aicr"
       else
-        log_warning "Attestation verification failed — cannot confirm binary provenance"
+        err "Provenance verification failed — refusing to install ${BINARY} ${TAG}"
       fi
     fi
   else
