@@ -187,6 +187,19 @@ var stockRenderOptIns = []stockRenderOptIn{
 		covers: []string{"nktp"},
 	},
 	{
+		// No stock recipe selects lws yet (ADR-024); it has no dependencies.
+		name: "h100-eks-ubuntu-inference-nim+lws",
+		leaf: "h100-eks-ubuntu-inference-nim",
+		overlay: &overlayAddition{
+			componentRefs: []recipe.ComponentRef{{
+				Name:       "lws",
+				Type:       recipe.ComponentTypeHelm,
+				ValuesFile: "components/lws/values.yaml",
+			}},
+		},
+		covers: []string{"lws"},
+	},
+	{
 		// The gpuStack=dra value (#2517) renders a different advertiser
 		// shape than the gke-default stock pass: the installer DaemonSet
 		// on, both device plugins off, whole-GPU DRA armed. No covers

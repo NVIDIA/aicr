@@ -650,6 +650,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `kubeflow-trainer` | Kubeflow Trainer v2 for distributed training |
 | `kubeflow-training-operator` | Kubeflow Training Operator v1 (`kubeflow.org/v1` jobs) for the Run:ai leaves |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
+| `lws` | LeaderWorkerSet — leader/worker pod groups for multi-node inference serving (not installed by default) |
 | `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
 | `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
