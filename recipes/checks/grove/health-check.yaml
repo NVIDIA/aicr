@@ -31,7 +31,7 @@ spec:
     assert: 5m
   steps:
     - name: validate-crds-established
-      # Verified against chart v0.1.0-alpha.14, which installs these six CRDs
+      # Verified against chart v0.1.0-alpha.17, which installs these six CRDs
       # from crds/. A CRD whose shortName a leftover CRD still holds, such as
       # clustertopologybindings after an upgrade from v0.1.0-alpha.8, never
       # becomes Established.

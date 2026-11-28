@@ -44,7 +44,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **k8s-ephemeral-storage-metrics** | `ops` | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | `ops` | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | `ops` | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. On the `*-inference-dynamo` leaves, which ship Grove, AICR sets `scheduler.args.default-staleness-grace-period: "-1s"`: Grove's KAI backend owns PodGroup termination timing, so the Dynamo platform chart README requires KAI's own stale-PodGroup eviction off. Every other leaf keeps KAI's default cleanup. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. Upgrading from `v0.1.0-alpha.13` requires a CRD apply too — see [Upgrade Notes](#grove-v010-alpha13-to-v010-alpha14) below. | [Grove](https://github.com/ai-dynamo/grove) |
+| **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. Upgrading from `v0.1.0-alpha.13` requires a CRD apply too — see [Upgrade Notes](#grove-v010-alpha13-to-v010-alpha14) below. Upgrading to `v0.1.0-alpha.17` also requires a CRD apply: see [Upgrade Notes](#grove-v010-alpha13-or-v010-alpha14-to-v010-alpha17) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | `ops` | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. AICR pins the chart's Grove preflight hook image (`dynamo-operator.grovePreflight.image`, `docker.io/library/python:3.12-slim`) by digest, because the chart pulls it from Docker Hub by tag only; on a mirrored registry, point that value at the mirror. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | `ops` | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | `ops` | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
@@ -3551,6 +3551,49 @@ retries, wait for grove to be healthy and re-sync `dynamo-platform` manually.
 The same bundles set `scheduler.args.default-staleness-grace-period: "-1s"` on
 `kai-scheduler`, so applying the regenerated `kai-scheduler` release hands
 PodGroup termination timing to Grove, as the Dynamo chart README requires.
+
+No resource migration is needed.
+
+### `grove`: `v0.1.0-alpha.13` or `v0.1.0-alpha.14` to `v0.1.0-alpha.17`
+
+This section starts from alpha.13 or alpha.14. From alpha.12 or earlier, an
+earlier section's CRD apply followed by resuming the deployer at this pin runs
+alpha.17 against an older schema. `aicr upgrade-check` reports that jump as
+`blocked` and names the stops: alpha.12 and then alpha.13 from alpha.8, or
+alpha.13 from alpha.12. Land on each stop with its section above, re-run the
+check, then follow this section.
+
+alpha.15 and alpha.16 are fix releases. alpha.17 changes one CRD, which stays
+at `v1alpha1`:
+
+- **`podcliquesets.grove.io`:** gains `status.scalingProgress`, where the
+  operator records the replica indices a scale-in or scale-out has selected
+  ([ai-dynamo/grove#918](https://github.com/ai-dynamo/grove/pull/918)).
+
+`helm upgrade` never applies changed `crds/`, so a plain chart bump keeps the
+old schema and the API server drops `status.scalingProgress`. Availability-aware
+scale-in then loses its persisted selection and can reuse a replica index before
+that replica's resources are gone. From alpha.13 the jump also crosses the
+alpha.14 changes in the section above, so until the new CRDs are applied the
+alpha.13 CEL rule rejects every `Anchor` PodGangMap write.
+
+Apply the new CRDs before upgrading:
+
+1. Apply the alpha.17 CRDs directly from the chart:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.17 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+2. Resume whichever deployer you use, as in the sections above. The
+   `dynamo-platform` ordering in the previous section still applies.
+
+The alpha.17 operator's ClusterRole also gains `get`, `list`, `watch` and
+`delete` on `resource.nvidia.com` `computedomains`, which it uses to clean up
+the ComputeDomains its PodCliqueSets own.
+
+alpha.17 is the last alpha: `v0.2.0-beta1` moves CRD storage to
+`grove.io/v1beta1`, so the next grove upgrade is a migration.
 
 No resource migration is needed.
 

@@ -53,7 +53,7 @@ is not what this evidence qualifies.
 
 The Network Operator 25.7.0 marketplace distribution is a scoped exception
 matching the reference stack. Everything else follows the registry defaults,
-including dynamo-platform 1.6.2, grove v0.1.0-alpha.14 and KAI Scheduler
+including dynamo-platform 1.6.2, grove v0.1.0-alpha.17 and KAI Scheduler
 v0.18.8. Monitoring and lab-specific
 Prometheus endpoints are not prerequisites of this minimal inference stack.
 
@@ -73,7 +73,7 @@ recipe evidence before upstream submission, following
 **This evidence predates the current recipe.** It was captured with Dynamo
 1.5.0 and KAI Scheduler v0.17.1, which the recipe pinned at the time. The recipe
 now follows the registry defaults (dynamo-platform 1.6.2, grove
-v0.1.0-alpha.14, KAI Scheduler v0.18.8), so it needs requalifying on that stack.
+v0.1.0-alpha.17, KAI Scheduler v0.18.8), so it needs requalifying on that stack.
 
 The October 16, 2026 full run at source
 `3a80fbf9e10c806e1a554faa22d602978680a2e8` passed all eight checks in one
